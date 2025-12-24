@@ -10,7 +10,7 @@ import json
 from tqdm import tqdm
 
 # --- 1. Импортируем пути из централизованного конфига ---
-from config import PREPROCESSED_DATA_DIR, GENERATED_DATA_DIR, FINAL_DATASET_DIR
+from config.paths import PREPROCESSED_DATA_DIR, GENERATED_DATA_DIR, FINAL_DATASET_DIR
 
 
 def prepare_final_dataset():

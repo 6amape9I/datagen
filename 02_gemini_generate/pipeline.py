@@ -85,8 +85,8 @@ def preprocess_sentence_for_llm(sentence_data: Dict[str, Any]) -> Dict[str, Any]
     """
     Подготавливает данные для LLM: создает поле 'syntactic_link_candidates_names'
     из 'syntactic_link_candidates'. Это обеспечивает обратную совместимость
-    и позволяет проводить "слепое" тестирование LLM, не показывая ей наши
-    уровни уверенности (confidence).
+    и позволяет проводить "слепое" тестирование LLM, не раскрывая внутренние
+    эвристические оценки кандидатов.
     """
     if "nodes" in sentence_data:
         for node in sentence_data["nodes"]:
@@ -126,7 +126,7 @@ def worker(q: Queue, key_cycler):
                 llm_input_data = preprocess_sentence_for_llm(original_sentence_data.copy())
                 response_json = get_model_response(client, llm_input_data)
 
-                # 3. Валидацию проводим с ОРИГИНАЛЬНЫМИ данными для доступа к `confidence` в логах
+                # 3. Валидацию проводим с ОРИГИНАЛЬНЫМИ данными, чтобы логировать детали узла
                 if response_json and 'nodes' in response_json and validate_response(original_sentence_data, response_json['nodes']):
                     final_record = {
                         "sentence_id": original_sentence_data['sentence_id'],

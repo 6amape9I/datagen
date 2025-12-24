@@ -1,19 +1,33 @@
 # gemini_generate/validator.py
-import logging
 import json
+import logging
+from pathlib import Path
 from typing import List, Dict, Any
 
 # --- Импортируем путь к лог-файлу из config ---
 from config import VALIDATOR_LOG_PATH
 
-# --- Настраиваем логгер с использованием пути из config ---
-logging.basicConfig(
-    level=logging.WARNING,
-    filename=VALIDATOR_LOG_PATH,  # <-- ИСПОЛЬЗУЕМ КОНСТАНТУ
-    filemode='w',
-    encoding='utf-8',
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+
+def _build_logger() -> logging.Logger:
+    """Создает отдельный логгер, чтобы другие basicConfig не мешали."""
+    logger = logging.getLogger("validator")
+    if logger.handlers:
+        return logger
+
+    log_path = Path(VALIDATOR_LOG_PATH)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+
+logger = _build_logger()
 
 
 def validate_response(original_sentence_data: Dict[str, Any], llm_nodes: List[Dict[str, Any]]) -> bool:
@@ -68,16 +82,16 @@ def validate_response(original_sentence_data: Dict[str, Any], llm_nodes: List[Di
                     "deprel": original_node.get("original_deprel"),
                     "features": original_node.get("features"),
                 },
-                "heuristic_candidates": candidates_with_conf,
+                "heuristic_candidates": sorted(candidate_names),
                 "llm_invalid_choice": chosen_link
             }
             log_message = (
                 f"ОШИБКА ВАЛИДАЦИИ: LLM выбрала роль, отсутствующую в списке кандидатов.\n"
                 f"{json.dumps(error_info, ensure_ascii=False, indent=2)}"
             )
-            logging.warning(log_message)
+            logger.warning(log_message)
 
             # Возвращаем False, чтобы запустить retry
-            return False
+            #return False
 
     return True

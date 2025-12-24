@@ -3,6 +3,7 @@
 import pyconll
 import logging
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from config import ALL_RELATIONS_MAP, HEURISTIC_RULES, PROCESSOR_LOG_PATH
@@ -16,10 +17,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Поле confidence/experimental больше не используется в проектной логике
-
 # Счетчик случаев, когда сработал самый общий фолбэк (ANY token)
 _FALLBACK_ANY_COUNT = 0
+_VALID_TOKEN_ID_PATTERN = re.compile(r"^\d+$")
+
+
+def _is_valid_token_id(raw_id: Optional[str]) -> bool:
+    """Допускаются только целочисленные идентификаторы (без точек и других символов)."""
+    if not raw_id:
+        return False
+    return bool(_VALID_TOKEN_ID_PATTERN.match(str(raw_id)))
 
 def get_and_reset_fallback_any_count() -> int:
     global _FALLBACK_ANY_COUNT
@@ -61,12 +68,16 @@ def generate_candidates_from_rules(token: pyconll.unit.token.Token, sentence: py
         token_features["head_lemma"] = head_word.lemma.lower() if head_word.lemma else ""
         token_features["head_degree"] = list(head_features['Degree'])[0] if 'Degree' in head_features else None
     for rule in HEURISTIC_RULES:
-        conditions_met = True
-        for cond_key, cond_value in rule["conditions"].items():
-            value_to_check = token_features.get(cond_key)
-            if not _check_condition(value_to_check, cond_value, cond_key):
-                conditions_met = False
-                break
+        conditions = rule.get("conditions", {})
+        if not conditions:
+            conditions_met = True
+        else:
+            conditions_met = False
+            for cond_key, cond_value in conditions.items():
+                value_to_check = token_features.get(cond_key)
+                if _check_condition(value_to_check, cond_value, cond_key):
+                    conditions_met = True
+                    break
         if conditions_met:
             rule_name = str(rule.get("rule_name", ""))
             is_fallback = rule_name.lower().startswith("fallback")
@@ -123,16 +134,23 @@ def process_syntagrus_file(filepath: Path, source_filename: str, sentence_limit:
         function_ids_to_remove = set()
 
         def find_fixed_chain(start_token):
+            if not _is_valid_token_id(start_token.id):
+                return []
             chain = [start_token]
             for t in sentence:
-                if t.head == start_token.id and t.deprel == 'fixed': chain.extend(find_fixed_chain(t))
+                if not _is_valid_token_id(t.id):
+                    continue
+                if t.head == start_token.id and t.deprel == 'fixed':
+                    chain.extend(find_fixed_chain(t))
             return chain
 
         for token in sentence:
+            if not _is_valid_token_id(token.id):
+                continue
             if token.id in marker_ids_to_remove: continue
             if token.deprel in ['case', 'cc', 'mark']:
                 head_id = token.head
-                if head_id and head_id != '0':
+                if head_id and head_id != '0' and _is_valid_token_id(head_id):
                     marker_chain = find_fixed_chain(token)
                     marker_chain.sort(key=lambda t: int(t.id))
                     full_marker_form = "-".join([t.form for t in marker_chain])
@@ -145,10 +163,12 @@ def process_syntagrus_file(filepath: Path, source_filename: str, sentence_limit:
             'dislocated', 'dep'
         }
         for token in sentence:
+            if not _is_valid_token_id(token.id):
+                continue
             if token.id in marker_ids_to_remove or token.id in function_ids_to_remove: continue
             if token.deprel in FUNCTION_ROOT_DEPRELS:
                 head_id = token.head
-                if head_id and head_id != '0':
+                if head_id and head_id != '0' and _is_valid_token_id(head_id):
                     chain = find_fixed_chain(token)
                     chain.sort(key=lambda t: int(t.id))
                     full_form = "-".join([t.form for t in chain])
@@ -158,32 +178,37 @@ def process_syntagrus_file(filepath: Path, source_filename: str, sentence_limit:
             elif token.deprel == 'fixed':
                 # Оставшиеся fixed, не попавшие в маркерные или служебные цепочки — присоединим к их head напрямую
                 head_id = token.head
-                if head_id and head_id != '0' and token.id not in function_ids_to_remove and token.id not in marker_ids_to_remove:
+                if head_id and head_id != '0' and _is_valid_token_id(head_id) and token.id not in function_ids_to_remove and token.id not in marker_ids_to_remove:
                     acc = function_parts_to_merge.setdefault(head_id, [])
                     acc.append(token.form)
                     function_ids_to_remove.add(token.id)
             # Дополнительно: сливаем SYM, а также некоторые PART/ADP в нетипичных deprel
             elif token.upos == 'SYM':
                 head_id = token.head
-                if head_id and head_id != '0':
+                if head_id and head_id != '0' and _is_valid_token_id(head_id):
                     acc = function_parts_to_merge.setdefault(head_id, [])
                     acc.append(token.form)
                     function_ids_to_remove.add(token.id)
             elif token.upos == 'PART' and token.deprel in {'appos', 'orphan', 'dep', 'dislocated'}:
                 head_id = token.head
-                if head_id and head_id != '0':
+                if head_id and head_id != '0' and _is_valid_token_id(head_id):
                     acc = function_parts_to_merge.setdefault(head_id, [])
                     acc.append(token.form)
                     function_ids_to_remove.add(token.id)
             elif token.upos == 'ADP' and token.deprel in {'appos', 'dislocated', 'dep'}:
                 head_id = token.head
-                if head_id and head_id != '0':
+                if head_id and head_id != '0' and _is_valid_token_id(head_id):
                     acc = function_parts_to_merge.setdefault(head_id, [])
                     acc.append(token.form)
                     function_ids_to_remove.add(token.id)
         processed_tokens = []
         for token in sentence:
-            if token.upos == 'PUNCT' or token.id in marker_ids_to_remove or token.id in function_ids_to_remove:
+            if (
+                token.upos == 'PUNCT'
+                or token.id in marker_ids_to_remove
+                or token.id in function_ids_to_remove
+                or not _is_valid_token_id(token.id)
+            ):
                 continue
             word_form = token.form
             link_intro_info = None
@@ -196,7 +221,7 @@ def process_syntagrus_file(filepath: Path, source_filename: str, sentence_limit:
             function_parts = function_parts_to_merge.get(token.id)
             if function_parts:
                 word_form = f"{word_form}-" + "-".join(function_parts)
-            if token.head is None or token.head == '0':
+            if token.head is None or token.head == '0' or not _is_valid_token_id(token.head):
                 generated_candidates = ["ROOT"]
             else:
                 generated_candidates = generate_candidates_from_rules(token, sentence, marker_info_for_token)
@@ -211,7 +236,7 @@ def process_syntagrus_file(filepath: Path, source_filename: str, sentence_limit:
                     logging.warning(log_message)
                     generated_candidates = sorted(ALL_RELATIONS_MAP.values())
             target_id = token.head
-            if target_id == '0':
+            if target_id == '0' or not _is_valid_token_id(target_id):
                 target_id = None
             else:
                 target_id = f"w{token.head}"
