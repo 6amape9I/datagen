@@ -8,12 +8,12 @@ from queue import Queue
 from itertools import cycle
 from typing import Set, Dict, Any
 
-from google import genai
+import requests
 
 # 1. Импортируем все настройки и зависимости из config и локальных модулей
 from config import (
     API_KEYS, MODEL_NAME, NUM_WORKERS, MAX_RETRIES, INITIAL_BACKOFF_DELAY,
-    PREPROCESSED_DATA_DIR, GENERATED_DATA_DIR
+    PREPROCESSED_DATA_DIR, GENERATED_DATA_DIR, LOCAL_API_URL
 )
 from gemini_client import get_model_response
 from validator import validate_response
@@ -105,10 +105,14 @@ def worker(q: Queue, key_cycler):
     api_key = next(key_cycler)
     thread_name = threading.current_thread().name
     try:
-        client = genai.Client(api_key=api_key)
-        print(f"✅ {thread_name} запущен успешно с ключом ...{api_key[-4:]}")
+        session = requests.Session()
+        session.trust_env = False
+        if api_key:
+            print(f"✅ {thread_name} запущен успешно с ключом ...{api_key[-4:]}")
+        else:
+            print(f"✅ {thread_name} запущен успешно (локальный сервис)")
     except Exception as e:
-        print(f"❌ {thread_name}: Не удалось создать API-клиент. Ошибка: {e}. Воркер останавливается.")
+        print(f"❌ {thread_name}: Не удалось создать HTTP-клиент. Ошибка: {e}. Воркер останавливается.")
         return
 
     while not q.empty():
@@ -124,7 +128,7 @@ def worker(q: Queue, key_cycler):
             for attempt in range(MAX_RETRIES):
                 # 2. Применяем препроцессор для создания "слепой" версии для LLM
                 llm_input_data = preprocess_sentence_for_llm(original_sentence_data.copy())
-                response_json = get_model_response(client, llm_input_data)
+                response_json = get_model_response(session, llm_input_data)
 
                 # 3. Валидацию проводим с ОРИГИНАЛЬНЫМИ данными, чтобы логировать детали узла
                 if response_json and 'nodes' in response_json and validate_response(original_sentence_data, response_json['nodes']):
@@ -164,8 +168,7 @@ def worker(q: Queue, key_cycler):
 def run_pipeline_final():
     """Главная функция для запуска всего пайплайна."""
     if not API_KEYS:
-        print("❌ Не найдены API ключи. Установите переменную окружения GEMINI_API_KEYS или заполните config.py.")
-        return
+        print(f"⚠️  API ключи не найдены. Использую локальный сервис: {LOCAL_API_URL}")
 
     # --- Шаг 1: Сканирование прогресса ---
     print("--- Шаг 1: Сканирование прогресса... ---")
@@ -202,7 +205,7 @@ def run_pipeline_final():
 
     # --- Шаг 3: Запуск воркеров ---
     print(f"\n--- Шаг 3: Запуск {NUM_WORKERS} воркеров ---")
-    key_cycler = cycle(API_KEYS)
+    key_cycler = cycle(API_KEYS or [None])
     threads = []
     for i in range(NUM_WORKERS):
         thread = threading.Thread(target=worker, args=(task_queue, key_cycler), name=f"Воркер-{i + 1}")

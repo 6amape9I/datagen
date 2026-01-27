@@ -17,7 +17,7 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import List, Optional, Tuple
 
-from google import genai
+import requests
 
 from config import (
     PREPROCESSED_DATA_DIR,
@@ -173,12 +173,13 @@ def _process_with_key(
     metrics: WorkerMetrics,
 ) -> None:
     try:
-        client = genai.Client(api_key=api_key)
-        _print_worker("запущен", worker_name, api_key)
+        session = requests.Session()
+        session.trust_env = False
+        _print_worker("запущен (локальный сервис)", worker_name, api_key)
     except Exception as exc:  # pragma: no cover - сетевой код
         metrics.stop_reason = "client_init_failed"
         metrics.last_error = str(exc)
-        _print_worker(f"не удалось создать клиента: {exc}", worker_name, api_key)
+        _print_worker(f"не удалось создать HTTP-клиент: {exc}", worker_name, api_key)
         return
 
     while True:
@@ -201,7 +202,7 @@ def _process_with_key(
             for attempt in range(MAX_RETRIES):
                 llm_input_data = preprocess_sentence_for_llm(original_sentence_data.copy())
                 response_json, error_info = get_model_response(
-                    client, llm_input_data, return_error=True
+                    session, llm_input_data, return_error=True
                 )
                 response = response_json
                 error_text = error_info

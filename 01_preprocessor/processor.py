@@ -251,6 +251,7 @@ def process_syntagrus_file(filepath: Path, source_filename: str, sentence_limit:
             if function_parts:
                 token_data["function_parts"] = function_parts
             processed_tokens.append(token_data)
-        if not processed_tokens: continue
+        if len(processed_tokens) <= 2:
+            continue
         all_sentences_data.append({"sentence_id": global_sentence_id, "text": sentence.text, "nodes": processed_tokens})
     return all_sentences_data

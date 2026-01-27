@@ -1,9 +1,11 @@
 import requests
 import sys
 
+from config import LOCAL_API_URL
+
 # URL твоего сервиса (API)
 # Используем 127.0.0.1 вместо localhost, чтобы избежать путаницы с IPv6
-API_URL = "http://127.0.0.1:8000/generate"
+API_URL = LOCAL_API_URL
 
 
 def test_connection():
