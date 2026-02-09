@@ -1,4 +1,4 @@
-"""Ежедневный шедулер для этапа 02_gemini_generate.
+"""Ежедневный шедулер для этапа 03_gemini_fix_errors.
 
 Использует большой пул ключей и поддерживает ограниченное число воркеров,
 которые последовательно перебирают ключи, пока очередь предложений не опустеет
@@ -20,11 +20,11 @@ from typing import List, Optional, Tuple
 import requests
 
 from config import (
-    PREPROCESSED_DATA_DIR,
-    GENERATED_DATA_DIR,
+    FIXED_DATA_DIR,
     INITIAL_BACKOFF_DELAY,
     MAX_RETRIES,
     MODEL_NAME,
+    REQUEST_STRATEGY,
     ALL_SCHEDULER_KEYS,
     SCHEDULER_MAX_CONCURRENT_WORKERS,
     SCHEDULER_CONSECUTIVE_ERROR_LIMIT,
@@ -32,6 +32,7 @@ from config import (
     SCHEDULER_LOG_PATH,
 )
 from gemini_client import get_model_response
+from local_client import get_local_model_response
 from validator import validate_response
 
 
@@ -49,8 +50,8 @@ def _load_pipeline_helpers():
 _PIPELINE = _load_pipeline_helpers()
 load_processed_ids = _PIPELINE.load_processed_ids
 migrate_data_to_include_model_name = _PIPELINE.migrate_data_to_include_model_name
-preprocess_sentence_for_llm = _PIPELINE.preprocess_sentence_for_llm
-file_locks = _PIPELINE.file_locks
+get_file_lock = _PIPELINE.get_file_lock
+build_task_queue_from_local = _PIPELINE.build_task_queue_from_local
 
 
 class ThreadSafeCounter:
@@ -103,38 +104,16 @@ def _print_worker(msg: str, worker_name: str, key: Optional[str] = None) -> None
 
 
 def _write_result(output_filename: str, record: dict) -> None:
-    lock = file_locks.get(output_filename)
-    if not lock:
-        print(f"⚠️  Нет file_lock для файла {output_filename}, пропускаю запись.")
-        return
+    lock = get_file_lock(output_filename)
     with lock:
-        output_path = GENERATED_DATA_DIR / output_filename
+        output_path = FIXED_DATA_DIR / output_filename
         with open(output_path, "a", encoding="utf-8") as f_out:
             f_out.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _build_task_queue(processed_ids) -> Tuple[Queue, int]:
-    """Формирует очередь задач аналогично pipeline.run_pipeline_final."""
-    task_queue: Queue = Queue()
-    files_to_process = sorted(list(PREPROCESSED_DATA_DIR.glob("*.json")))
-    total_tasks = 0
-
-    for filepath in files_to_process:
-        output_filename = filepath.name.replace(".json", ".jsonl")
-        if output_filename not in file_locks:
-            print(f"  - ⚠️  Неизвестное имя файла {output_filename}, пропускается.")
-            continue
-        with open(filepath, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-            except json.JSONDecodeError as exc:
-                print(f"  - ❌ Не удалось прочитать {filepath.name}: {exc}")
-                continue
-            for sentence_data in data:
-                if sentence_data["sentence_id"] not in processed_ids:
-                    task_queue.put((sentence_data, output_filename))
-                    total_tasks += 1
-    return task_queue, total_tasks
+    """Формирует очередь задач через общий helper из pipeline.py."""
+    return build_task_queue_from_local(processed_ids)
 
 
 def _log_summary(total_successes: int, used_keys: List[str], reports: List[WorkerMetrics], remaining_tasks: int) -> None:
@@ -173,9 +152,20 @@ def _process_with_key(
     metrics: WorkerMetrics,
 ) -> None:
     try:
-        session = requests.Session()
-        session.trust_env = False
-        _print_worker("запущен (локальный сервис)", worker_name, api_key)
+        if REQUEST_STRATEGY == "local":
+            session = requests.Session()
+            session.trust_env = False
+            client = session
+            response_fn = get_local_model_response
+            _print_worker("запущен (локальный сервис)", worker_name, api_key)
+        elif REQUEST_STRATEGY in {"genai", "google"}:
+            if not api_key:
+                raise ValueError("API ключ не задан для стратегии genai.")
+            client = api_key
+            response_fn = get_model_response
+            _print_worker("запущен (GenAI)", worker_name, api_key)
+        else:
+            raise ValueError(f"Неизвестная стратегия REQUEST_STRATEGY='{REQUEST_STRATEGY}'.")
     except Exception as exc:  # pragma: no cover - сетевой код
         metrics.stop_reason = "client_init_failed"
         metrics.last_error = str(exc)
@@ -192,7 +182,7 @@ def _process_with_key(
             metrics.stop_reason = "no_tasks_available"
             return
 
-        original_sentence_data, output_filename = task
+        original_sentence_data, llm_input_data, output_filename = task
         requeue_task = False
         should_break = False
 
@@ -200,9 +190,8 @@ def _process_with_key(
             success = False
             current_delay = INITIAL_BACKOFF_DELAY
             for attempt in range(MAX_RETRIES):
-                llm_input_data = preprocess_sentence_for_llm(original_sentence_data.copy())
-                response_json, error_info = get_model_response(
-                    session, llm_input_data, return_error=True
+                response_json, error_info = response_fn(
+                    client, llm_input_data, return_error=True
                 )
                 response = response_json
                 error_text = error_info
@@ -244,7 +233,7 @@ def _process_with_key(
         finally:
             task_queue.task_done()
             if requeue_task:
-                task_queue.put((original_sentence_data, output_filename))
+                task_queue.put((original_sentence_data, llm_input_data, output_filename))
 
         if should_break:
             return
@@ -287,11 +276,11 @@ def run_scheduler_once() -> None:
         return
 
     print("=== Gemini Scheduler: подготовка ===")
-    processed_ids = load_processed_ids(GENERATED_DATA_DIR)
+    processed_ids = load_processed_ids(FIXED_DATA_DIR)
     if processed_ids:
         print(f"  Пропустим {len(processed_ids)} предложений — уже обработаны.")
 
-    migrate_data_to_include_model_name(GENERATED_DATA_DIR)
+    migrate_data_to_include_model_name(FIXED_DATA_DIR)
 
     task_queue, total_tasks = _build_task_queue(processed_ids)
     if total_tasks == 0:

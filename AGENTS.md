@@ -1,18 +1,19 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- Stages: `01_preprocessor/`, `02_gemini_generate/`, `03_postprocessor/`.
+- Stages: `01_preprocessor/`, `02_local_generation/`, `03_gemini_fix_errors/`, `04_postprocessor/`.
 - Shared config: `config/` (see `config/paths.py` for dataset/log paths).
 - Utilities: `utils/` (helpers and analysis scripts).
-- Data & logs: `datasets/01_raw_corpus`, `datasets/02_preprocessed`, `datasets/03_generated`, `datasets/04_final`, and `logs/`.
+- Data & logs: `datasets/01_raw_corpus`, `datasets/02_preprocessed`, `datasets/03_local_generated`, `datasets/04_fixed`, `datasets/05_final`, and `logs/`.
 - Example raw file: `datasets/01_raw_corpus/ru_syntagrus-ud-train-a.conllu`.
 
 ## Build, Test, and Dev Commands
 - Environment: Python 3.12+. Create a venv and install deps: `pip install pyconll google-genai tqdm`.
 - Preprocess SynTagRus: `python 01_preprocessor/main.py` → writes JSON to `datasets/02_preprocessed`.
-- Generate labels (Gemini): `python 02_gemini_generate/pipeline.py` → writes JSONL to `datasets/03_generated`.
+- Local generation (LLM): `python 02_local_generation/pipeline.py` → writes JSONL to `datasets/03_local_generated`.
+- Gemini fix errors: `python 03_gemini_fix_errors/pipeline.py` → writes JSONL to `datasets/04_fixed`.
   - Configure API keys via `GEMINI_API_KEYS="key1,key2"` (overrides `config/generate_conf.py`).
-- Postprocess final dataset: `python 03_postprocessor/prepare_final_dataset.py` → writes to `datasets/04_final`.
+- Postprocess final dataset: `python 04_postprocessor/prepare_final_dataset.py` → writes to `datasets/05_final`.
 - Optional analysis: `python utils/analyze_dataset.py`.
 
 ## Coding Style & Naming
@@ -34,7 +35,7 @@
 ## Security & Config Tips
 - Never commit API keys. Prefer `GEMINI_API_KEYS` env var; multiple keys comma-separated.
 - Large data and logs are gitignored; do not commit corpora.
-- Rate limits: worker count derives from keys (`config/pipeline_conf.py`). Adjust carefully.
+- Rate limits: worker counts and quotas live in `config/pipeline_conf.py`. Adjust carefully.
 
 ## Agent-Specific Notes
 - Reuse centralized config and dataset layout; avoid introducing ad-hoc folders.

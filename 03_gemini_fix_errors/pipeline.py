@@ -6,26 +6,35 @@ import time
 import threading
 from queue import Queue
 from itertools import cycle
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, Optional
 
 import requests
 
 # 1. Импортируем все настройки и зависимости из config и локальных модулей
 from config import (
-    API_KEYS, MODEL_NAME, NUM_WORKERS, MAX_RETRIES, INITIAL_BACKOFF_DELAY,
-    PREPROCESSED_DATA_DIR, GENERATED_DATA_DIR, LOCAL_API_URL
+    API_KEYS,
+    MODEL_NAME,
+    NUM_WORKERS,
+    MAX_RETRIES,
+    INITIAL_BACKOFF_DELAY,
+    PREPROCESSED_DATA_DIR,
+    LOCAL_GENERATED_DATA_DIR,
+    FIXED_DATA_DIR,
+    LOCAL_API_URL,
+    REQUEST_STRATEGY,
 )
 from gemini_client import get_model_response
+from local_client import get_local_model_response
 from validator import validate_response
 
 # --- НАСТРОЙКИ ПАЙПЛАЙНА УДАЛЕНЫ, ТЕПЕРЬ ВСЕ В CONFIG ---
 
 # Потокобезопасные замки для записи в файлы
-file_locks = {
-    "train.jsonl": threading.Lock(),
-    "val.jsonl": threading.Lock(),
-    "test.jsonl": threading.Lock(),
-}
+file_locks: Dict[str, threading.Lock] = {}
+
+
+def get_file_lock(output_filename: str) -> threading.Lock:
+    return file_locks.setdefault(output_filename, threading.Lock())
 
 
 def load_processed_ids(output_dir: Path) -> Set[str]:
@@ -81,23 +90,49 @@ def migrate_data_to_include_model_name(output_dir: Path):
                 print(f"  - ❌ Не удалось записать обновленный файл {filepath.name}: {e}")
 
 
-def preprocess_sentence_for_llm(sentence_data: Dict[str, Any]) -> Dict[str, Any]:
+def _build_preprocessed_index(filepath: Path) -> Dict[str, Dict[str, Any]]:
+    """Загружает preprocessed JSON и строит индекс sentence_id -> запись."""
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {item["sentence_id"]: item for item in data if "sentence_id" in item}
+
+
+def _convert_nodes_for_llm(preprocessed_sentence: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Подготавливает данные для LLM: создает поле 'syntactic_link_candidates_names'
-    из 'syntactic_link_candidates'. Это обеспечивает обратную совместимость
-    и позволяет проводить "слепое" тестирование LLM, не раскрывая внутренние
-    эвристические оценки кандидатов.
+    Готовит вход для LLM в новом формате:
+    text + nodes[{id, name, pos_universal, pos_specific, features, syntactic_link_target_id}]
     """
-    if "nodes" in sentence_data:
-        for node in sentence_data["nodes"]:
-            if "syntactic_link_candidates" in node:
-                raw = node.get('syntactic_link_candidates', [])
-                if raw and isinstance(raw[0], dict):
-                    candidate_names = [c.get('name') for c in raw if isinstance(c, dict) and c.get('name')]
-                else:
-                    candidate_names = [str(c) for c in raw]
-                node['syntactic_link_candidates_names'] = sorted(list(set(candidate_names)))
-    return sentence_data
+    llm_nodes = []
+    for node in preprocessed_sentence.get("nodes", []):
+        llm_nodes.append(
+            {
+                "id": node.get("id"),
+                "name": node.get("name"),
+                "pos_universal": node.get("pos_universal"),
+                "pos_specific": node.get("pos_specific"),
+                "features": node.get("features", {}),
+                "syntactic_link_target_id": node.get("syntactic_link_target_id"),
+            }
+        )
+
+    return {
+         #"sentence_id": preprocessed_sentence.get("sentence_id"),
+        "text": preprocessed_sentence.get("text"),
+        "nodes": llm_nodes,
+    }
+
+
+def _get_preprocessed_sentence(
+    sentence_id: str,
+    preprocessed_path: Path,
+    cache: Dict[Path, Dict[str, Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """Достает preprocessed-запись по sentence_id с кэшем по файлу."""
+    if preprocessed_path not in cache:
+        if not preprocessed_path.exists():
+            return None
+        cache[preprocessed_path] = _build_preprocessed_index(preprocessed_path)
+    return cache[preprocessed_path].get(sentence_id)
 
 
 def worker(q: Queue, key_cycler):
@@ -105,20 +140,28 @@ def worker(q: Queue, key_cycler):
     api_key = next(key_cycler)
     thread_name = threading.current_thread().name
     try:
-        session = requests.Session()
-        session.trust_env = False
-        if api_key:
+        if REQUEST_STRATEGY == "local":
+            session = requests.Session()
+            session.trust_env = False
+            client = session
+            response_fn = get_local_model_response
+            print(f"✅ {thread_name} запущен успешно (локальный сервис)")
+        elif REQUEST_STRATEGY in {"genai", "google"}:
+            if not api_key:
+                raise ValueError("API ключ не задан для стратегии genai.")
+            client = api_key
+            response_fn = get_model_response
             print(f"✅ {thread_name} запущен успешно с ключом ...{api_key[-4:]}")
         else:
-            print(f"✅ {thread_name} запущен успешно (локальный сервис)")
+            raise ValueError(f"Неизвестная стратегия REQUEST_STRATEGY='{REQUEST_STRATEGY}'.")
     except Exception as e:
         print(f"❌ {thread_name}: Не удалось создать HTTP-клиент. Ошибка: {e}. Воркер останавливается.")
         return
 
     while not q.empty():
         try:
-            # 1. Получаем ОРИГИНАЛЬНЫЕ данные из очереди
-            original_sentence_data, output_filename = q.get()
+            # 1. Получаем preprocessed-данные и имя выходного файла из очереди
+            original_sentence_data, llm_input_data, output_filename = q.get()
             sentence_id = original_sentence_data.get('sentence_id', 'N/A')
             print(f"-> {thread_name}: Взял в работу ID {sentence_id}")
 
@@ -126,9 +169,9 @@ def worker(q: Queue, key_cycler):
             current_delay = INITIAL_BACKOFF_DELAY
 
             for attempt in range(MAX_RETRIES):
-                # 2. Применяем препроцессор для создания "слепой" версии для LLM
-                llm_input_data = preprocess_sentence_for_llm(original_sentence_data.copy())
-                response_json = get_model_response(session, llm_input_data)
+                # 2. Отправляем в LLM новый компактный JSON
+                response_json = response_fn(client, llm_input_data)
+                #time.sleep(10)
 
                 # 3. Валидацию проводим с ОРИГИНАЛЬНЫМИ данными, чтобы логировать детали узла
                 if response_json and 'nodes' in response_json and validate_response(original_sentence_data, response_json['nodes']):
@@ -139,12 +182,11 @@ def worker(q: Queue, key_cycler):
                         "model_name": MODEL_NAME
                     }
 
-                    lock = file_locks.get(output_filename)
-                    if lock:
-                        with lock:
-                            output_path = GENERATED_DATA_DIR / output_filename
-                            with open(output_path, 'a', encoding='utf-8') as f_out:
-                                f_out.write(json.dumps(final_record, ensure_ascii=False) + '\n')
+                    lock = get_file_lock(output_filename)
+                    with lock:
+                        output_path = FIXED_DATA_DIR / output_filename
+                        with open(output_path, 'a', encoding='utf-8') as f_out:
+                            f_out.write(json.dumps(final_record, ensure_ascii=False) + '\n')
 
                     success = True
                     break # Выходим из цикла повторов в случае успеха
@@ -165,37 +207,76 @@ def worker(q: Queue, key_cycler):
             q.task_done()
 
 
+def build_task_queue_from_local(processed_ids: Set[str]) -> tuple[Queue, int]:
+    task_queue = Queue()
+    files_to_process = sorted(list(LOCAL_GENERATED_DATA_DIR.glob("*.jsonl")))
+    preprocessed_cache: Dict[Path, Dict[str, Dict[str, Any]]] = {}
+    total_tasks_added = 0
+
+    for filepath in files_to_process:
+        output_filename = filepath.name
+        preprocessed_path = PREPROCESSED_DATA_DIR / f"{filepath.stem}.json"
+
+        if not preprocessed_path.exists():
+            print(
+                f"  - ⚠️  Не найден соответствующий preprocessed-файл {preprocessed_path.name} для {filepath.name}."
+            )
+            continue
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    local_record = json.loads(line)
+                except json.JSONDecodeError:
+                    print(f"  - ⚠️  Поврежденная строка в {filepath.name}, пропускается.")
+                    continue
+
+                sentence_id = local_record.get("sentence_id")
+                if not sentence_id or sentence_id in processed_ids:
+                    continue
+
+                preprocessed_sentence = _get_preprocessed_sentence(
+                    sentence_id=sentence_id,
+                    preprocessed_path=preprocessed_path,
+                    cache=preprocessed_cache,
+                )
+
+                if not preprocessed_sentence:
+                    print(
+                        f"  - ⚠️  Не найдена preprocessed-запись для sentence_id={sentence_id} "
+                        f"в файле {preprocessed_path.name}."
+                    )
+                    continue
+
+                llm_input_data = _convert_nodes_for_llm(preprocessed_sentence)
+                print(llm_input_data)
+
+                task_queue.put((preprocessed_sentence, llm_input_data, output_filename))
+                total_tasks_added += 1
+
+    return task_queue, total_tasks_added
+
+
 def run_pipeline_final():
     """Главная функция для запуска всего пайплайна."""
-    if not API_KEYS:
-        print(f"⚠️  API ключи не найдены. Использую локальный сервис: {LOCAL_API_URL}")
+    if not API_KEYS and REQUEST_STRATEGY in {"genai", "google"}:
+        print("⚠️  API ключи не найдены. Для стратегии genai они обязательны.")
+        return
+    if REQUEST_STRATEGY == "local":
+        print(f"⚠️  Использую локальный сервис: {LOCAL_API_URL}")
 
     # --- Шаг 1: Сканирование прогресса ---
     print("--- Шаг 1: Сканирование прогресса... ---")
-    processed_ids = load_processed_ids(GENERATED_DATA_DIR)
+    processed_ids = load_processed_ids(FIXED_DATA_DIR)
     if processed_ids:
         print(f"Найдено {len(processed_ids)} уже обработанных предложений. Они будут пропущены.")
 
     # --- Шаг 1.5: Миграция данных для совместимости ---
-    migrate_data_to_include_model_name(GENERATED_DATA_DIR)
+    migrate_data_to_include_model_name(FIXED_DATA_DIR)
 
     # --- Шаг 2: Загрузка НОВЫХ задач в очередь ---
     print("\n--- Шаг 2: Загрузка новых задач в очередь ---")
-    task_queue = Queue()
-    files_to_process = sorted(list(PREPROCESSED_DATA_DIR.glob("*.json")))
-    total_tasks_added = 0
-
-    for filepath in files_to_process:
-        output_filename = filepath.name.replace(".json", ".jsonl")
-        if not output_filename in file_locks:
-             print(f"  - ⚠️  Неизвестное имя файла {output_filename}, пропускается. Добавьте его в 'file_locks'.")
-             continue
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            for sentence_data in data:
-                if sentence_data['sentence_id'] not in processed_ids:
-                    task_queue.put((sentence_data, output_filename))
-                    total_tasks_added += 1
+    task_queue, total_tasks_added = build_task_queue_from_local(processed_ids)
 
     if total_tasks_added == 0:
         print("🎉 Вся обработка уже завершена. Новых задач нет.")

@@ -1,10 +1,9 @@
 """Example client that sends a local inference request.
 
-Run the server first:
-  python scripts/05_inference_server.py serve --host 127.0.0.1 --port 8000
+Run a compatible local inference server first (it should expose POST /infer on 127.0.0.1:8000).
 
 Then run:
-  python user.py "Ваше предложение"
+  python 02_local_generation/request_example.py "Ваше предложение"
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
 import json
-from pathlib import Path
 from collections import defaultdict
 import pprint
+
+from config import PREPROCESSED_DATA_DIR
 
 
 def analyze_dataset_features():
@@ -9,11 +10,11 @@ def analyze_dataset_features():
     Собирает статистику по уникальным значениям ключевых полей
     в датасете для построения точных эвристик.
     """
-    SOURCE_DATA_DIR = Path("./dataset")
+    SOURCE_DATA_DIR = PREPROCESSED_DATA_DIR
 
     if not SOURCE_DATA_DIR.exists():
         print(f"❌ Ошибка: Директория '{SOURCE_DATA_DIR}' не найдена.")
-        print("Пожалуйста, сначала запустите main.py, чтобы сгенерировать датасет.")
+        print("Пожалуйста, сначала запустите 01_preprocessor/main.py, чтобы сгенерировать датасет.")
         return
 
     # Используем defaultdict(set) для автоматического сбора уникальных значений
