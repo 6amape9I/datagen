@@ -2,7 +2,7 @@
 import json
 from typing import Any, Dict, Optional, Tuple, Union
 
-from genai_example import generate
+from gemini_client_comp import generate
 
 
 ReturnType = Union[Dict[str, Any], None, Tuple[Optional[Dict[str, Any]], Optional[str]]]

@@ -1,13 +1,13 @@
 # Stage 03 — Gemini Fix Errors
 
-Стадия `03_gemini_fix_errors` берёт результат локальной генерации и правит ошибки с помощью Gemini. На вход подаются объединённые данные из `datasets/02_preprocessed` и `datasets/03_local_generated`, а на выходе формируется исправленный набор в `datasets/04_fixed`.
+Стадия `03_gemini_fix_errors` правит ошибки с помощью Gemini, используя в качестве источника предложений `datasets/02_preprocessed`. На выходе формируется исправленный набор в `datasets/04_fixed`.
 
 ## Основные файлы и импорты
 
 - `pipeline.py` — точка входа `run_pipeline_final()`. Импортирует:
   - служебные модули (`Path`, `json`, `threading`, `Queue`, `cycle`);
   - `requests` (HTTP-клиент);
-  - `config` (`API_KEYS`, `MODEL_NAME`, `NUM_WORKERS`, `MAX_RETRIES`, `INITIAL_BACKOFF_DELAY`, `PREPROCESSED_DATA_DIR`, `LOCAL_GENERATED_DATA_DIR`, `FIXED_DATA_DIR`);
+  - `config` (`API_KEYS`, `MODEL_NAME`, `NUM_WORKERS`, `MAX_RETRIES`, `INITIAL_BACKOFF_DELAY`, `PREPROCESSED_DATA_DIR`, `FIXED_DATA_DIR`);
   - локальные `gemini_client.get_model_response` и `validator.validate_response`.
 - `scheduler.py` — дневной шедулер, переиспользует helper’ы из `pipeline.py`.
 - `gemini_client.py` — обёртка над HTTP-сервисом. Использует из `config` промпты и `LOCAL_API_URL`.
@@ -18,8 +18,7 @@
 - API ключи приходят из `config/pipeline_conf.py`: строка по умолчанию прописана в `config/generate_conf.py`, но её можно переопределить переменной окружения `GEMINI_API_KEYS="key1,key2"`.
 - Число воркеров (`NUM_WORKERS`) и лимиты ретраев (`MAX_RETRIES`, `INITIAL_BACKOFF_DELAY`) задаются в `config/pipeline_conf.py`.
 - Пути к данным берутся из `config/paths.py`:
-  - вход-1: `datasets/02_preprocessed/*.json` (`PREPROCESSED_DATA_DIR`);
-  - вход-2: `datasets/03_local_generated/*.jsonl` (`LOCAL_GENERATED_DATA_DIR`);
+  - вход: `datasets/02_preprocessed/*.json` (`PREPROCESSED_DATA_DIR`);
   - выход: `datasets/04_fixed/*.jsonl` (`FIXED_DATA_DIR`).
 - Модель (`MODEL_NAME`) задаётся в `config/generate_conf.py` и сохраняется в выходных записях для трекинга.
 
@@ -28,17 +27,16 @@
 1. Если ключей нет, пишет предупреждение и продолжает работать через локальный сервис.
 2. `load_processed_ids()` проходит по `datasets/04_fixed/*.jsonl`, собирает `sentence_id`, чтобы не перегенерировать записи (дубли игнорируются).
 3. `migrate_data_to_include_model_name()` обеспечивает наличие поля `model_name` в старых jsonl (ставит `unknown`).
-4. `build_task_queue_from_local()` формирует очередь задач:
-   - берёт каждый `*.jsonl` из `datasets/03_local_generated`;
-   - ищет соответствующий `*.json` в `datasets/02_preprocessed`;
-   - объединяет записи по `sentence_id` через `merge_sentence_data()` так, чтобы сохранить кандидатов из preprocessed;
+4. `build_task_queue_from_preprocessed()` формирует очередь задач:
+   - берёт каждый `*.json` из `datasets/02_preprocessed`;
+   - формирует вход в LLM напрямую из preprocessed-нод (`text`, `nodes[{id,name,pos_*,features,syntactic_link_target_id}]`);
    - кладёт в очередь только ещё не обработанные `sentence_id`.
 5. Если очередь пустая — ранний выход.
 6. Создаются воркеры (`threading.Thread`, имя `Воркер-i`), каждый поднимает `requests.Session` с отключённым прокси (`trust_env = False`).
 7. Каждый воркер:
-   - забирает объединённую запись из очереди;
+   - забирает preprocessed-запись из очереди;
    - до `MAX_RETRIES` раз:
-     - делает копию данных → `preprocess_sentence_for_llm()` → `gemini_client.get_model_response()`;
+     - отправляет компактный JSON в `gemini_client.get_model_response()`;
      - прогоняет ответ через `validator.validate_response(original, response['nodes'])`;
      - при успехе пишет запись (с `model_name`) в `datasets/04_fixed/<split>.jsonl` под lock.
 8. Основной поток ждёт `task_queue.join()` и печатает, что работа завершена.
@@ -68,7 +66,6 @@ python 03_gemini_fix_errors/pipeline.py
 Перед запуском убедитесь, что:
 
 - в `datasets/02_preprocessed/` лежат `*.json` из этапа 01;
-- в `datasets/03_local_generated/` лежат `*.jsonl` из этапа 02;
 - директории из `config/paths.py` существуют (создаются автоматически при импорте config);
 - локальный сервис доступен на `LOCAL_API_URL`;
 - лог `logs/validator_errors.log` доступен на запись (создаётся автоматически).

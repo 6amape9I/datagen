@@ -209,5 +209,5 @@ marimo/_lsp/
 __marimo__/
 /logs_hist/
 /logs/
-/config/
 /datasets/
+/config/generate_conf.py

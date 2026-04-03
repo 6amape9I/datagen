@@ -1,0 +1,296 @@
+# config/semantic.py
+from typing import Dict, List
+
+# --- СЛОВАРИ И КАРТЫ СЕМАНТИЧЕСКИХ СВЯЗЕЙ ---
+SEMANTIC_RELATIONS_MAP: Dict[int, str] = {
+    1: "Agent", 2: "Patient", 3: "Recipient", 4: "Instrument",
+    5: "Inclusion_Containment", 6: "Exteriority", 7: "Support", 8: "Subjacency",
+    9: "Covering_Superadjacency", 10: "Proximity", 11: "Contact_Adjacency",
+    12: "Attachment", 13: "Front_Region", 14: "Posterior_Region_Behind",
+    15: "Intermediacy", 16: "Opposition_Across_from",
+    17: "Alignment_Alongness", 18: "Circumference_Encirclement",
+    19: "Crossing_Transverse", 20: "Lateral_Beside",
+    21: "Functional_Proximity", 22: "Source_as_Origin",
+    23: "Egress_Exiting_an_Interior", 24: "Separation_from_a_Surface",
+    25: "Departure_from_a_Landmark", 26: "Emergence_from_below",
+    27: "Descent_from_a_high_point", 28: "Ascent_to_a_high_point",
+    29: "Detachment", 30: "Egress_from_an_intermediate_position",
+    31: "Emergence_from_behind_an_obstacle", 32: "Goal_as_Recipient",
+    33: "Distribution_over_an_area", 34: "Ingress_Entering_an_Interior",
+    35: "Attaining_a_Surface", 36: "Approaching_a_Landmark",
+    37: "Attachment_Connection", 38: "Reaching_a_lower_position",
+    39: "Reaching_the_other_side_Crossing",
+    40: "Movement_to_a_posterior_region", 41: "Entering_an_intermediate_position",
+    42: "Penetration", 43: "Transverse", 44: "Alignment", 45: "Bypass",
+    46: "Circumvention", 47: "Vertical_path", 48: "Superlative_Sublative",
+    49: "Interlative", 50: "Reaching_an_abstract_goal_state",
+    51: "Metaphorical_Path", 52: "Finality", 53: "Acquisition", 54: "Numeric",
+    55: "Quantitative_Large", 56: "Quantitative_Small",
+    57: "Collective_Relation", 58: "Approximative_Relation",
+    59: "Proportional_Fractional_Relation", 60: "Metric_Measuring_Relation",
+    61: "Duration", 62: "Point_in_Time", 63: "Frequency",
+    64: "Terminus_ad_quem_Deadline", 65: "Prospective_Starting_point",
+    66: "Quality", 67: "Possession", 68: "Content_Theme",
+    69: "Addition_Conjunction", 70: "Disjunction"
+}
+CLAUSE_RELATIONS_MAP: Dict[int, str] = {
+    71: "Contrast", 72: "Juxtaposition", 73: "Concession", 74: "Alternative",
+    75: "Clarification", 76: "Sequence_in_time_before",
+    77: "Sequence_in_time_after", 78: "Sequence_in_time_while",
+    79: "Reason_because", 80: "Result_since", 81: "Result_because",
+    82: "Goal", 83: "Condition", 84: "Comparison", 85: "Specification_which",
+    86: "Specification_that_is", 87: "Exception", 88: "Addition",
+    89: "Disjunction"
+}
+
+ALL_RELATIONS_MAP: Dict[int, str] = {**SEMANTIC_RELATIONS_MAP, **CLAUSE_RELATIONS_MAP}
+
+# --- Общие списки частей речи для условий ---
+NOUN_LIKE_POS = ["NOUN", "PROPN", "PRON"]
+ADJ_POS = ["ADJ"]
+ADV_POS = ["ADV"]
+VERB_POS = ["VERB"]
+NUM_POS = ["NUM"]
+CONJ_POS = ["CCONJ", "SCONJ"]
+ADP_POS = ["ADP"]
+
+# --- ЭВРИСТИКИ ГЕНЕРАЦИИ КАНДИДАТОВ ---
+
+HEURISTIC_RULES = [
+    {"rule_name": "Agent (passive)", "conditions": {"deprel": ["obl:agent"], "pos": NOUN_LIKE_POS}, "candidates": [1]},
+    {"rule_name": "Agent (active)",
+     "conditions": {"deprel": ["nsubj"], "case": ["Nom"], "animacy": ["Anim"], "pos": NOUN_LIKE_POS}, "candidates": [1]},
+    {"rule_name": "Patient (passive subject)", "conditions": {"deprel": ["nsubj:pass"], "pos": NOUN_LIKE_POS}, "candidates": [2]},
+    {"rule_name": "Patient (direct object)", "conditions": {"deprel": ["obj"], "case": ["Acc"], "pos": NOUN_LIKE_POS}, "candidates": [2]},
+    {"rule_name": "Patient (inanimate subject)",
+     "conditions": {"deprel": ["nsubj"], "animacy": ["Inan"], "pos": NOUN_LIKE_POS}, "candidates": [2]},
+    {"rule_name": "Recipient",
+     "conditions": {"deprel": ["iobj", "obl"], "case": ["Dat"], "animacy": ["Anim"], "pos": NOUN_LIKE_POS}, "candidates": [3]},
+    {"rule_name": "Instrument",
+     "conditions": {"deprel": ["obl"], "case": ["Ins"], "animacy": ["Inan"], "pos": NOUN_LIKE_POS}, "candidates": [4]},
+    {"rule_name": "Instrument (as iobj)", "conditions": {"deprel": ["iobj"], "case": ["Ins"], "pos": NOUN_LIKE_POS}, "candidates": [4]},
+
+    # --- II. Статические пространственные отношения ---
+    {"rule_name": "Movement/Location IN/INTO (Ambiguous)",
+     "conditions": {"marker": ["в", "во"], "case": ["Loc", "Acc"], "pos": NOUN_LIKE_POS}, "candidates": [5, 34, 35]},
+    {"rule_name": "Exteriority (static)",
+     "conditions": {"marker": ["за", "вне", "снаружи"], "case": ["Ins", "Gen"], "pos": NOUN_LIKE_POS}, "candidates": [6]},
+    {"rule_name": "Location/Movement ON",
+     "conditions": {"marker": ["на"], "case": ["Loc", "Acc"], "pos": NOUN_LIKE_POS}, "candidates": [7, 28, 35, 37]},
+    {"rule_name": "Subjacency (static, under)",
+     "conditions": {"marker": ["под", "подо"], "case": ["Ins"], "pos": NOUN_LIKE_POS}, "candidates": [8]},
+    {"rule_name": "Superadjacency (static, over)",
+     "conditions": {"marker": ["над", "надо"], "case": ["Ins"], "pos": NOUN_LIKE_POS}, "candidates": [9]},
+    {"rule_name": "Contact / Adjacency", "conditions": {"marker": ["к", "по"], "case": ["Dat"], "pos": NOUN_LIKE_POS}, "candidates": [11]},
+    {"rule_name": "Attachment (static)", "conditions": {"marker": ["на"], "case": ["Loc"], "pos": NOUN_LIKE_POS}, "candidates": [12]},
+    {"rule_name": "Front Region", "conditions": {"marker": ["перед"], "case": ["Ins"], "pos": NOUN_LIKE_POS}, "candidates": [13]},
+    {"rule_name": "Posterior Region",
+     "conditions": {"marker": ["за", "позади"], "case": ["Ins", "Gen"], "pos": NOUN_LIKE_POS}, "candidates": [14]},
+    {"rule_name": "Intermediacy (between)",
+     "conditions": {"marker": ["между"], "case": ["Ins", "Gen"], "pos": NOUN_LIKE_POS}, "candidates": [15]},
+    {"rule_name": "Opposition (across from)",
+     "conditions": {"marker": ["против"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [16]},
+    {"rule_name": "Alignment / Alongness (static)",
+     "conditions": {"marker": ["вдоль"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [17]},
+
+    # --- III, IV, V. Динамические роли ---
+    {"rule_name": "Source Complex (from)",
+     "conditions": {"marker": ["от", "из", "с", "со"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [22, 23, 24, 25, 27, 29]},
+    {"rule_name": "Emergence from below", "conditions": {"marker": ["из-под"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [26]},
+    {"rule_name": "Goal Complex (to)",
+     "conditions": {"marker": ["до", "к", "по"], "case": ["Gen", "Dat"], "pos": NOUN_LIKE_POS}, "candidates": [32, 36, 50, 64]},
+    {"rule_name": "Goal Lower Position (under)",
+     "conditions": {"marker": ["под", "подо"], "case": ["Acc"], "pos": NOUN_LIKE_POS}, "candidates": [38]},
+    {"rule_name": "Path/Goal Complex with 'za'/'cherez'/'skvoz'",
+     "conditions": {"marker": ["через", "сквозь", "за"], "case": ["Acc"], "pos": NOUN_LIKE_POS}, "candidates": [39, 42, 43, 40]},
+    {"rule_name": "Path General Complex (along/on)",
+     "conditions": {"marker": ["по"], "case": ["Dat"], "pos": NOUN_LIKE_POS}, "candidates": [17, 33, 42, 43, 44, 47]},
+    {"rule_name": "Bypass (past)", "conditions": {"marker": ["мимо"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [45]},
+    {"rule_name": "Movement/State AROUND", "conditions": {"marker": ["вокруг"], "pos": NOUN_LIKE_POS}, "candidates": [46, 18]},
+
+    # --- VI. Абстрактные и метафорические ---
+    {"rule_name": "Reaching abstract state (becoming)",
+     "conditions": {"deprel": ["xcomp"], "case": ["Ins"], "pos": ["VERB", "ADJ"]}, "candidates": [50]},
+    {"rule_name": "Finality (Goal-action, infinitive)",
+     "conditions": {"pos": VERB_POS, "verb_form": ["Inf"]}, "candidates": [52]},
+    {"rule_name": "Acquisition (Goal-object)",
+     "conditions": {"marker": ["за", "по", "на"], "case": ["Ins", "Acc"], "pos": NOUN_LIKE_POS}, "candidates": [53]},
+
+    # --- VII. Количественные ---
+    {"rule_name": "Numeric (exact quantity)", "conditions": {"pos": NUM_POS}, "candidates": [54]},
+    {"rule_name": "Numeric (governed noun)", "conditions": {"deprel": ["nummod"], "pos": ["NOUN", "PROPN", "PRON"]}, "candidates": [54]},
+    {"rule_name": "Quantitative (Large)",
+     "conditions": {"lemma": ["много", "множество", "масса", "уйма", "тьма"], "pos": ["NOUN", "PROPN", "PRON", "ADV"]}, "candidates": [55]},
+    {"rule_name": "Quantitative (Small)",
+     "conditions": {"lemma": ["мало", "немного", "несколько", "пара", "тройка"], "pos": ["NOUN", "PROPN", "PRON", "ADV"]}, "candidates": [56]},
+    {"rule_name": "Collective",
+     "conditions": {"lemma": ["стадо", "стая", "толпа", "группа", "косяк", "рой", "коллектив", "команда"], "pos": NOUN_LIKE_POS},
+     "candidates": [57]},
+    {"rule_name": "Approximative (lexical)",
+     "conditions": {"lemma": ["около", "примерно", "порядка"], "pos": ["ADV", "ADP"]}, "candidates": [58]},
+    {"rule_name": "Approximative (syntactic)", "conditions": {"deprel": ["nummod:entity"], "pos": NUM_POS}, "candidates": [58]},
+    {"rule_name": "Proportional / Fractional",
+     "conditions": {"lemma": ["половина", "четверть", "треть", "часть", "доля", "процент"], "pos": NOUN_LIKE_POS}, "candidates": [59]},
+    {"rule_name": "Metric / Measuring",
+     "conditions": {"deprel": ["nmod"], "case": ["Gen"], "pos": NOUN_LIKE_POS,
+                    "head_lemma": ["килограмм", "метр", "литр", "тонна", "грамм", "штука", "коробка", "рубль",
+                                   "доллар"]},
+     "candidates": [60]},
+
+    # --- VIII. Временные ---
+    {"rule_name": "Temporal (general)", "conditions": {"deprel": ["obl:tmod"], "pos": ["NOUN", "PROPN", "PRON", "ADV"]}, "candidates": [61, 62]},
+    {"rule_name": "Point in Time (Lexical Adverbs)", "conditions": {
+        "lemma": ["теперь", "однажды", "сегодня", "завтра", "вчера", "потом", "затем", "скоро", "давно", "недавно",
+                  "позже"], "pos": ADV_POS}, "candidates": [62]},
+    {"rule_name": "Duration", "conditions": {"deprel": ["obl"], "case": ["Acc"], "pos": NOUN_LIKE_POS}, "candidates": [61]},
+    {"rule_name": "Frequency / Distribution Ambiguity",
+     "conditions": {"marker": ["по"], "case": ["Dat"], "number": ["Plur"], "pos": NOUN_LIKE_POS}, "candidates": [63, 33]},
+    {"rule_name": "Deadline", "conditions": {"marker": ["до", "к"], "case": ["Gen", "Dat"], "pos": NOUN_LIKE_POS}, "candidates": [64]},
+    {"rule_name": "Starting Point (time)",
+     "conditions": {"marker": ["с", "со", "после"], "case": ["Gen"], "deprel": ["obl"], "pos": NOUN_LIKE_POS},
+     "candidates": [65]},
+
+    {"rule_name": "Frequency (advmod)",
+     "conditions": {"deprel": ["advmod"], "pos": ["ADV"]}, "candidates": [63]},
+
+    # --- IX. Атрибутивные и логические ---
+    {"rule_name": "Quality", "conditions": {"deprel": ["amod"], "pos": ADJ_POS}, "candidates": [66]},
+    {"rule_name": "Quality (predicative oblique)",
+     "conditions": {"deprel": ["obl"], "pos": ADJ_POS, "case": ["Nom"]}, "candidates": [66]},
+    {"rule_name": "Quality (genitive attribute)",
+     "conditions": {"deprel": ["nmod"], "case": ["Gen"], "pos": ["NOUN", "PROPN", "PRON"]}, "candidates": [66]},
+    {"rule_name": "Quality (instrumental attribute)",
+     "conditions": {"deprel": ["nmod"], "case": ["Ins"], "pos": ["NOUN", "PROPN", "PRON"]}, "candidates": [66]},
+    {"rule_name": "Quality (demonstrative determiner)",
+     "conditions": {"deprel": ["det"], "case": ["Ins"], "pos": ["DET", "PRON"]}, "candidates": [66]},
+    {"rule_name": "Possession",
+     "conditions": {"deprel": ["nmod"], "case": ["Gen"], "has_marker": False, "pos": NOUN_LIKE_POS}, "candidates": [67]},
+    {"rule_name": "Possession (u-construction)",
+     "conditions": {"marker": ["у"], "case": ["Gen"], "head_lemma": ["есть", "иметься"], "pos": NOUN_LIKE_POS}, "candidates": [67]},
+    {"rule_name": "Content/Theme", "conditions": {"marker": ["о", "об", "обо", "про"], "pos": NOUN_LIKE_POS}, "candidates": [68]},
+    {"rule_name": "Conjunction",
+     "conditions": {"deprel": ["conj", "cc"], "marker": ["и", "а", "да", "тоже", "также"], "pos": CONJ_POS}, "candidates": [69]},
+    {"rule_name": "Disjunction (intra-clause)", "conditions": {"marker": ["или", "либо", "иль"], "pos": CONJ_POS}, "candidates": [70]},
+
+    # --- Связи между клаузами ---
+    {"rule_name": "Contrast",
+     "conditions": {"marker": ["а", "но", "однако", "зато", "тогда-как"], "pos": ["CCONJ", "SCONJ", "ADV"]}, "candidates": [71]},
+    {"rule_name": "Juxtaposition (не A, а B)",
+     "conditions": {"deprel": ["conj", "cc"], "marker": ["а"], "pos": CONJ_POS}, "candidates": [72, 71]},
+    {"rule_name": "Concession",
+     "conditions": {"marker": ["хотя", "хоть", "несмотря-на-то-что", "пускай", "пусть"], "pos": ["CCONJ", "SCONJ", "ADV"]}, "candidates": [73]},
+    {"rule_name": "Disjunction (inter-clause)",
+     "conditions": {"marker": ["или", "либо", "то-ли"], "pos": CONJ_POS}, "candidates": [70, 74, 89]},
+    {"rule_name": "Clarification (that...)",
+     "conditions": {"deprel": ["ccomp", "csubj"], "marker": ["что", "чтобы", "будто", "как"], "pos": CONJ_POS}, "candidates": [75]},
+    {"rule_name": "Clarification (a imenno)",
+     "conditions": {"marker": ["а-именно"], "pos": CONJ_POS}, "candidates": [75]},
+    {"rule_name": "Specification (which...)", "conditions": {"deprel": ["acl", "acl:relcl"], "pos": ["NOUN", "PROPN", "PRON", "ADJ"]}, "candidates": [85]},
+    {"rule_name": "Specification (that is...)",
+     "conditions": {"marker": ["то-есть", "т-есть", "т.-е.", "то-бишь"], "pos": ["CCONJ", "SCONJ", "ADV"]}, "candidates": [86]},
+    {"rule_name": "Time Sequence (before)",
+     "conditions": {"marker": ["перед-тем-как", "прежде-чем", "до-того-как"], "pos": CONJ_POS}, "candidates": [76]},
+    {"rule_name": "Time Sequence (after)",
+     "conditions": {"marker": ["после-того-как", "с-тех-пор-как", "когда", "как-только"], "pos": CONJ_POS}, "candidates": [77]},
+    {"rule_name": "Time Sequence (while)",
+     "conditions": {"marker": ["пока", "покуда", "покамест", "в-то-время-как"], "pos": CONJ_POS}, "candidates": [78]},
+    {"rule_name": "Reason/Result Complex",
+     "conditions": {"marker": ["потому-что", "так-как", "поскольку", "ибо", "оттого-что", "из-за-того-что"], "pos": CONJ_POS}, "candidates": [79, 80, 81]},
+    {"rule_name": "Result (poetomu)",
+     "conditions": {"deprel": ["advmod"], "lemma": ["поэтому", "следовательно", "итак"], "pos": ADV_POS}, "candidates": [81]},
+    {"rule_name": "Goal (in order to)", "conditions": {"marker": ["чтобы", "чтоб", "дабы"], "pos": CONJ_POS}, "candidates": [82]},
+    {"rule_name": "Condition (if)",
+     "conditions": {"marker": ["если", "если-бы", "коли", "ежели", "раз"], "pos": CONJ_POS}, "candidates": [83]},
+    {"rule_name": "Comparison (by head degree)", "conditions": {"head_degree": ["Cmp"], "pos": ADJ_POS}, "candidates": [84]},
+    {"rule_name": "Exception",
+     "conditions": {"marker": ["кроме", "за-исключением", "помимо"], "pos": ADP_POS}, "candidates": [87]},
+    {"rule_name": "Addition",
+     "conditions": {"lemma": ["включая"], "marker": ["в-том-числе"], "pos": ["ADP", "NOUN", "PROPN", "PRON"]}, "candidates": [88]},
+    {"rule_name": "Alternative (coordinated nouns)",
+     "conditions": {"deprel": ["conj"], "case": ["Nom"], "pos": ["NOUN", "PROPN", "PRON"]}, "candidates": [74]},
+
+    # --- Новые и исправленные правила из нашего анализа ---
+    {"rule_name": "Attachment (dynamic, to)", "conditions": {"marker": ["к"], "case": ["Dat"], "pos": NOUN_LIKE_POS}, "candidates": [37]},
+    {"rule_name": "Impact on Surface (strike on)",
+     "conditions": {"marker": ["по"], "case": ["Dat"], "pos": NOUN_LIKE_POS}, "candidates": [35, 11]},
+    {"rule_name": "Numeric (Ordinal Numerals)", "conditions": {"pos": ["ADJ", "ADV"],
+                                                              "lemma": ["первый", "второй",
+                                                                        "третий", "четвертый",
+                                                                        "пятый", "шестой",
+                                                                        "седьмой", "восьмой",
+                                                                        "девятый", "десятый",
+                                                                        "последний",
+                                                                        "очередной"]},
+     "candidates": [54, 66]},
+    {"rule_name": "Comparison (by 'как')", "conditions": {"marker": ["как"], "pos": ["CCONJ", "SCONJ", "ADV"]}, "candidates": [84]},
+    {"rule_name": "Physical Proximity", "conditions": {"marker": ["около", "возле", "среди"], "pos": NOUN_LIKE_POS}, "candidates": [10]},
+    {"rule_name": "Ambiguous Proximity ('у')", "conditions": {"marker": ["у"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [10, 21]},
+    {"rule_name": "Ambiguous Proximity ('при')",
+     "conditions": {"marker": ["при"], "case": ["Loc"], "pos": NOUN_LIKE_POS}, "candidates": [10, 21]},
+    {"rule_name": "Goal (Purpose with 'dlya')",
+     "conditions": {"marker": ["для"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [52, 53]},
+    {"rule_name": "Goal (Purpose with 'radi')",
+     "conditions": {"marker": ["ради"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [52, 53]},
+    {"rule_name": "Instrument (via 'posredstvom')",
+     "conditions": {"marker": ["посредством"], "case": ["Gen"], "pos": NOUN_LIKE_POS}, "candidates": [4]},
+
+    # --- Экспериментальные правила ---
+    {"rule_name": "Circumference / Encirclement",
+     "conditions": {"marker": ["по"], "case": ["Dat"], "lemma": ["круг", "периметр", "контур"], "pos": NOUN_LIKE_POS}, "candidates": [18]},
+    {"rule_name": "Circumference (adverbial)",
+     "conditions": {"lemma": ["кругом"], "pos": ADV_POS}, "candidates": [18]},
+    {"rule_name": "Metaphorical Path (Candidate Generator)",
+     "conditions": {"pos": NOUN_LIKE_POS, "marker": ["по", "в", "с", "вдоль"]}, "candidates": [18]},
+    {"rule_name": "Path General Complex (Circumference part)",
+     "conditions": {"marker": ["по"], "case": ["Dat"], "pos": NOUN_LIKE_POS}, "candidates": [18]},
+    {"rule_name": "Circumference (by head verb)",
+     "conditions": {
+         "deprel": ["obl", "obj"],
+         "case": ["Ins"],
+     },
+     "candidates": [18]
+     },
+    {"rule_name": "Emergence from behind ('iz-za')",
+     "conditions": {"marker": ["из-за"], "case": ["Gen"]}, "candidates": [31, 79]}
+]
+
+# --- Fallback-правила (сети безопасности) ---
+HEURISTIC_RULES.extend([
+    {"rule_name": "Fallback for nsubj", "conditions": {"deprel": ["nsubj"]}, "candidates": [1, 2, 4]},
+    {"rule_name": "Fallback for obj", "conditions": {"deprel": ["obj"]}, "candidates": [2, 68]},
+    {"rule_name": "Fallback for iobj", "conditions": {"deprel": ["iobj"]}, "candidates": [3, 32, 2]},
+    {"rule_name": "Fallback for obl (broad)", "conditions": {"deprel": ["obl"]},
+     "candidates": [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 22, 25, 32, 36, 37, 38, 44, 61, 62, 64, 65,
+                    50, 68, 18, 52, 53, 66]},
+    {"rule_name": "Fallback for nmod", "conditions": {"deprel": ["nmod"]},
+     "candidates": [67, 68, 59, 60, 1, 2, 22, 5, 57]},
+    {"rule_name": "Fallback for amod", "conditions": {"deprel": ["amod"]}, "candidates": [66, 67]},
+    {"rule_name": "Fallback for nummod", "conditions": {"deprel": ["nummod", "nummod:entity"]},
+     "candidates": [54, 55, 56, 60]},
+
+    {"rule_name": "Fallback for advmod", "conditions": {"deprel": ["advmod"]},
+     "candidates": [62, 61, 63, 66, 10]},
+
+    {"rule_name": "Fallback for advcl", "conditions": {"deprel": ["advcl"]},
+     "candidates": [73, 76, 77, 78, 79, 80, 81, 82, 83, 84]},
+    {"rule_name": "Fallback for conj", "conditions": {"deprel": ["conj"]},
+     "candidates": [69, 70, 71, 74, 77, 80, 81, 51]},
+    {"rule_name": "Fallback for ccomp/csubj", "conditions": {"deprel": ["ccomp", "csubj"]}, "candidates": [75, 68]},
+    {"rule_name": "Fallback for parataxis", "conditions": {"deprel": ["parataxis"]},
+     "candidates": [72, 71, 75, 77, 81]},
+    {"rule_name": "Fallback for appos", "conditions": {"deprel": ["appos"]},
+     "candidates": [85, 75, 88]},
+    {"rule_name": "Fallback for orphan", "conditions": {"deprel": ["orphan"]}, "candidates": [75, 88, 72]},
+    {"rule_name": "Fallback for ANY token", "conditions": {}, "candidates": [
+        1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15, 16, 17, 18,
+        19, 20, 21, 22, 23, 24, 25, 26, 27,
+        28, 29, 30, 31, 32, 33, 34, 35, 36,
+        37, 38, 39, 40, 41, 42, 43, 44, 45,
+        46, 47, 48, 49, 50, 51, 52, 53, 54,
+        55, 56, 57, 58, 59, 60, 61, 62, 63,
+        64, 65, 66, 67, 68, 69, 70, 71, 72,
+        73, 74, 75, 76, 77, 78, 79, 80, 81,
+        82, 83, 84, 85, 86, 87, 88, 89
+    ]}
+])

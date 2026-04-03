@@ -6,7 +6,7 @@ import time
 import threading
 from queue import Queue
 from itertools import cycle
-from typing import Set, Dict, Any, Optional
+from typing import Set, Dict, Any
 
 import requests
 
@@ -18,12 +18,11 @@ from config import (
     MAX_RETRIES,
     INITIAL_BACKOFF_DELAY,
     PREPROCESSED_DATA_DIR,
-    LOCAL_GENERATED_DATA_DIR,
     FIXED_DATA_DIR,
     LOCAL_API_URL,
     REQUEST_STRATEGY,
 )
-from gemini_client import get_model_response
+from gemini_client_comp import generate
 from local_client import get_local_model_response
 from validator import validate_response
 
@@ -35,6 +34,40 @@ file_locks: Dict[str, threading.Lock] = {}
 
 def get_file_lock(output_filename: str) -> threading.Lock:
     return file_locks.setdefault(output_filename, threading.Lock())
+
+
+def get_model_response(api_key: str, sentence_data: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    GenAI-клиент для pipeline: напрямую использует функцию generate()
+    из gemini_client_comp (армянский промпт/схема).
+    """
+    if not api_key:
+        print("❌ Ошибка: не передан API ключ для GenAI.")
+        return None
+
+    try:
+        sentence_json_string = json.dumps(sentence_data, ensure_ascii=False, indent=2)
+    except (TypeError, AttributeError) as exc:
+        print(f"❌ Ошибка при сборке промпта: {exc}")
+        return None
+
+    full_response_text = ""
+    try:
+        full_response_text = generate(
+            sentence_json_string,
+            api_key=api_key,
+            return_text=True,
+        )
+        if not full_response_text:
+            print("  - 🟡 Ответ от GenAI пустой.")
+            return None
+        return json.loads(full_response_text)
+    except json.JSONDecodeError:
+        print(f"❌ Ошибка декодирования JSON. Ответ от GenAI:\n{full_response_text}")
+        return None
+    except Exception as exc:
+        print(f"❌ Непредвиденная ошибка во время запроса к GenAI: {exc}")
+        return None
 
 
 def load_processed_ids(output_dir: Path) -> Set[str]:
@@ -90,13 +123,6 @@ def migrate_data_to_include_model_name(output_dir: Path):
                 print(f"  - ❌ Не удалось записать обновленный файл {filepath.name}: {e}")
 
 
-def _build_preprocessed_index(filepath: Path) -> Dict[str, Dict[str, Any]]:
-    """Загружает preprocessed JSON и строит индекс sentence_id -> запись."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return {item["sentence_id"]: item for item in data if "sentence_id" in item}
-
-
 def _convert_nodes_for_llm(preprocessed_sentence: Dict[str, Any]) -> Dict[str, Any]:
     """
     Готовит вход для LLM в новом формате:
@@ -122,17 +148,22 @@ def _convert_nodes_for_llm(preprocessed_sentence: Dict[str, Any]) -> Dict[str, A
     }
 
 
-def _get_preprocessed_sentence(
-    sentence_id: str,
-    preprocessed_path: Path,
-    cache: Dict[Path, Dict[str, Dict[str, Any]]],
-) -> Optional[Dict[str, Any]]:
-    """Достает preprocessed-запись по sentence_id с кэшем по файлу."""
-    if preprocessed_path not in cache:
-        if not preprocessed_path.exists():
-            return None
-        cache[preprocessed_path] = _build_preprocessed_index(preprocessed_path)
-    return cache[preprocessed_path].get(sentence_id)
+def _iter_preprocessed_sentences(filepath: Path):
+    """Итерирует валидные sentence-record'ы из preprocessed-файла."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (IOError, json.JSONDecodeError) as e:
+        print(f"  - ⚠️  Не удалось прочитать {filepath.name}: {e}")
+        return
+
+    if not isinstance(data, list):
+        print(f"  - ⚠️  Некорректный формат {filepath.name}: ожидается JSON-массив.")
+        return
+
+    for item in data:
+        if isinstance(item, dict):
+            yield item
 
 
 def worker(q: Queue, key_cycler):
@@ -207,54 +238,32 @@ def worker(q: Queue, key_cycler):
             q.task_done()
 
 
-def build_task_queue_from_local(processed_ids: Set[str]) -> tuple[Queue, int]:
+def build_task_queue_from_preprocessed(processed_ids: Set[str]) -> tuple[Queue, int]:
     task_queue = Queue()
-    files_to_process = sorted(list(LOCAL_GENERATED_DATA_DIR.glob("*.jsonl")))
-    preprocessed_cache: Dict[Path, Dict[str, Dict[str, Any]]] = {}
+    files_to_process = sorted(list(PREPROCESSED_DATA_DIR.glob("*.json")))
     total_tasks_added = 0
 
     for filepath in files_to_process:
-        output_filename = filepath.name
-        preprocessed_path = PREPROCESSED_DATA_DIR / f"{filepath.stem}.json"
+        output_filename = f"{filepath.stem}.jsonl"
 
-        if not preprocessed_path.exists():
-            print(
-                f"  - ⚠️  Не найден соответствующий preprocessed-файл {preprocessed_path.name} для {filepath.name}."
-            )
-            continue
+        for preprocessed_sentence in _iter_preprocessed_sentences(filepath):
+            sentence_id = preprocessed_sentence.get("sentence_id")
+            if not sentence_id or sentence_id in processed_ids:
+                continue
 
-        with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    local_record = json.loads(line)
-                except json.JSONDecodeError:
-                    print(f"  - ⚠️  Поврежденная строка в {filepath.name}, пропускается.")
-                    continue
-
-                sentence_id = local_record.get("sentence_id")
-                if not sentence_id or sentence_id in processed_ids:
-                    continue
-
-                preprocessed_sentence = _get_preprocessed_sentence(
-                    sentence_id=sentence_id,
-                    preprocessed_path=preprocessed_path,
-                    cache=preprocessed_cache,
-                )
-
-                if not preprocessed_sentence:
-                    print(
-                        f"  - ⚠️  Не найдена preprocessed-запись для sentence_id={sentence_id} "
-                        f"в файле {preprocessed_path.name}."
-                    )
-                    continue
-
-                llm_input_data = _convert_nodes_for_llm(preprocessed_sentence)
-                print(llm_input_data)
-
-                task_queue.put((preprocessed_sentence, llm_input_data, output_filename))
-                total_tasks_added += 1
+            llm_input_data = _convert_nodes_for_llm(preprocessed_sentence)
+            task_queue.put((preprocessed_sentence, llm_input_data, output_filename))
+            total_tasks_added += 1
 
     return task_queue, total_tasks_added
+
+
+def build_task_queue_from_local(processed_ids: Set[str]) -> tuple[Queue, int]:
+    """
+    Backward-compatible alias для scheduler.py.
+    Теперь очередь строится напрямую из PREPROCESSED_DATA_DIR.
+    """
+    return build_task_queue_from_preprocessed(processed_ids)
 
 
 def run_pipeline_final():
@@ -276,7 +285,7 @@ def run_pipeline_final():
 
     # --- Шаг 2: Загрузка НОВЫХ задач в очередь ---
     print("\n--- Шаг 2: Загрузка новых задач в очередь ---")
-    task_queue, total_tasks_added = build_task_queue_from_local(processed_ids)
+    task_queue, total_tasks_added = build_task_queue_from_preprocessed(processed_ids)
 
     if total_tasks_added == 0:
         print("🎉 Вся обработка уже завершена. Новых задач нет.")
