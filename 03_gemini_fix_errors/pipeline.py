@@ -6,7 +6,7 @@ import time
 import threading
 from queue import Queue
 from itertools import cycle
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, List
 
 import requests
 
@@ -25,6 +25,7 @@ from config import (
 from gemini_client_comp import generate
 from local_client import get_local_model_response
 from validator import validate_response
+from utils.preprocessed_utils import get_legacy_nodes, get_model_input_units
 
 # --- НАСТРОЙКИ ПАЙПЛАЙНА УДАЛЕНЫ, ТЕПЕРЬ ВСЕ В CONFIG ---
 
@@ -125,19 +126,49 @@ def migrate_data_to_include_model_name(output_dir: Path):
 
 def _convert_nodes_for_llm(preprocessed_sentence: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Готовит вход для LLM в новом формате:
-    text + nodes[{id, name, pos_universal, pos_specific, features, syntactic_link_target_id}]
+    Готовит вход для LLM из v2 `units`, а при отсутствии — из legacy nodes.
     """
     llm_nodes = []
-    for node in preprocessed_sentence.get("nodes", []):
+    model_units = get_model_input_units(preprocessed_sentence)
+    unit_map = {unit.get("unit_id") or unit.get("id"): unit for unit in model_units if isinstance(unit, dict)}
+
+    for unit in model_units:
+        if "unit_id" in unit:
+            target_id = unit.get("syntactic_link_target_id")
+            head_surface = None
+            head_lemma = None
+            if target_id and isinstance(unit_map.get(target_id), dict):
+                head_surface = unit_map[target_id].get("surface")
+                head_lemma = unit_map[target_id].get("core_lemma")
+
+            llm_nodes.append(
+                {
+                    "id": unit.get("unit_id"),
+                    "name": unit.get("surface"),
+                    "surface": unit.get("surface"),
+                    "core_lemma": unit.get("core_lemma"),
+                    "pos_universal": unit.get("upos"),
+                    "pos_specific": unit.get("xpos"),
+                    "features": unit.get("features", {}),
+                    "syntactic_link_target_id": target_id,
+                    "original_deprel": unit.get("original_deprel"),
+                    "introduced_by": unit.get("introduced_by", []),
+                    "attached_tokens": unit.get("attached_tokens", []),
+                    "ud_semantic_hints": unit.get("ud_semantic_hints", []),
+                    "head_surface": head_surface,
+                    "head_lemma": head_lemma,
+                }
+            )
+            continue
+
         llm_nodes.append(
             {
-                "id": node.get("id"),
-                "name": node.get("name"),
-                "pos_universal": node.get("pos_universal"),
-                "pos_specific": node.get("pos_specific"),
-                "features": node.get("features", {}),
-                "syntactic_link_target_id": node.get("syntactic_link_target_id"),
+                "id": unit.get("id"),
+                "name": unit.get("name"),
+                "pos_universal": unit.get("pos_universal"),
+                "pos_specific": unit.get("pos_specific"),
+                "features": unit.get("features", {}),
+                "syntactic_link_target_id": unit.get("syntactic_link_target_id"),
             }
         )
 
@@ -164,6 +195,10 @@ def _iter_preprocessed_sentences(filepath: Path):
     for item in data:
         if isinstance(item, dict):
             yield item
+
+
+def _get_validation_nodes(preprocessed_sentence: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return get_legacy_nodes(preprocessed_sentence)
 
 
 def worker(q: Queue, key_cycler):
@@ -205,7 +240,9 @@ def worker(q: Queue, key_cycler):
                 #time.sleep(10)
 
                 # 3. Валидацию проводим с ОРИГИНАЛЬНЫМИ данными, чтобы логировать детали узла
-                if response_json and 'nodes' in response_json and validate_response(original_sentence_data, response_json['nodes']):
+                validation_sentence = dict(original_sentence_data)
+                validation_sentence["nodes"] = _get_validation_nodes(original_sentence_data)
+                if response_json and 'nodes' in response_json and validate_response(validation_sentence, response_json['nodes']):
                     final_record = {
                         "sentence_id": original_sentence_data['sentence_id'],
                         "text": original_sentence_data['text'],

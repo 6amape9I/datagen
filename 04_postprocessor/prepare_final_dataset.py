@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 # --- 1. Импортируем пути из централизованного конфига ---
 from config.paths import PREPROCESSED_DATA_DIR, FIXED_DATA_DIR, FINAL_DATASET_DIR
+from utils.preprocessed_utils import get_legacy_nodes
 
 
 def prepare_final_dataset():
@@ -65,7 +66,7 @@ def prepare_final_dataset():
                         source_record = source_map.get(sentence_id)
                         if not source_record: continue
                         battle_nodes = battle_record.get("nodes", [])
-                        source_nodes = source_record.get("nodes", [])
+                        source_nodes = get_legacy_nodes(source_record)
                         if len(battle_nodes) != len(source_nodes):
                             print(
                                 f"  - ⚠️  Пропуск sentence_id={sentence_id}: "

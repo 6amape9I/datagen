@@ -1,0 +1,14 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PREPROCESSOR_DIR = PROJECT_ROOT / "01_preprocessor"
+STAGE03_DIR = PROJECT_ROOT / "03_gemini_fix_errors"
+
+for path in (PROJECT_ROOT, PREPROCESSOR_DIR, STAGE03_DIR):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)

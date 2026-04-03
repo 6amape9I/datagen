@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 
 # --- Импортируем путь к лог-файлу из config ---
 from config import VALIDATOR_LOG_PATH
+from utils.preprocessed_utils import get_legacy_nodes
 
 
 def _build_logger() -> logging.Logger:
@@ -36,7 +37,7 @@ def validate_response(original_sentence_data: Dict[str, Any], llm_nodes: List[Di
     1. Набор ID совпадает с исходным (фатальная ошибка).
     2. Выбранная связь была в списке кандидатов (фатальная ошибка, логируется).
     """
-    original_nodes = original_sentence_data.get("nodes", [])
+    original_nodes = get_legacy_nodes(original_sentence_data)
     sentence_text = original_sentence_data.get("text", "N/A")
 
     original_ids = {node['id'] for node in original_nodes}

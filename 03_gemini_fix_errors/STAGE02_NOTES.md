@@ -1,82 +1,80 @@
 # Stage 03 — Gemini Fix Errors
 
-Стадия `03_gemini_fix_errors` правит ошибки с помощью Gemini, используя в качестве источника предложений `datasets/02_preprocessed`. На выходе формируется исправленный набор в `datasets/04_fixed`.
+Стадия `03_gemini_fix_errors` читает записи из `datasets/02_preprocessed`, строит model input и сохраняет размеченные `syntactic_link_name` в `datasets/04_fixed`.
 
-## Основные файлы и импорты
+## Что изменилось после rebuild Stage 01
 
-- `pipeline.py` — точка входа `run_pipeline_final()`. Импортирует:
-  - служебные модули (`Path`, `json`, `threading`, `Queue`, `cycle`);
-  - `requests` (HTTP-клиент);
-  - `config` (`API_KEYS`, `MODEL_NAME`, `NUM_WORKERS`, `MAX_RETRIES`, `INITIAL_BACKOFF_DELAY`, `PREPROCESSED_DATA_DIR`, `FIXED_DATA_DIR`);
-  - локальные `gemini_client.get_model_response` и `validator.validate_response`.
-- `scheduler.py` — дневной шедулер, переиспользует helper’ы из `pipeline.py`.
-- `gemini_client.py` — обёртка над HTTP-сервисом. Использует из `config` промпты и `LOCAL_API_URL`.
-- `validator.py` — проверяет ответ модели и логирует ошибки в `logs/validator_errors.log`.
+Stage 01 теперь пишет schema v2:
 
-## Конфигурация и данные
+- `tokens` — сырой UD-слой
+- `units` — основной normalized слой
+- `legacy_nodes` — transitional compatibility слой
 
-- API ключи приходят из `config/pipeline_conf.py`: строка по умолчанию прописана в `config/generate_conf.py`, но её можно переопределить переменной окружения `GEMINI_API_KEYS="key1,key2"`.
-- Число воркеров (`NUM_WORKERS`) и лимиты ретраев (`MAX_RETRIES`, `INITIAL_BACKOFF_DELAY`) задаются в `config/pipeline_conf.py`.
-- Пути к данным берутся из `config/paths.py`:
-  - вход: `datasets/02_preprocessed/*.json` (`PREPROCESSED_DATA_DIR`);
-  - выход: `datasets/04_fixed/*.jsonl` (`FIXED_DATA_DIR`).
-- Модель (`MODEL_NAME`) задаётся в `config/generate_conf.py` и сохраняется в выходных записях для трекинга.
+Stage 03 использует это так:
 
-## Ход пайплайна (`pipeline.run_pipeline_final`)
+- для model input предпочитает `units`
+- для validator compatibility-check использует `legacy_nodes`
+- для старых файлов без schema v2 умеет падать обратно на `nodes`
 
-1. Если ключей нет, пишет предупреждение и продолжает работать через локальный сервис.
-2. `load_processed_ids()` проходит по `datasets/04_fixed/*.jsonl`, собирает `sentence_id`, чтобы не перегенерировать записи (дубли игнорируются).
-3. `migrate_data_to_include_model_name()` обеспечивает наличие поля `model_name` в старых jsonl (ставит `unknown`).
-4. `build_task_queue_from_preprocessed()` формирует очередь задач:
-   - берёт каждый `*.json` из `datasets/02_preprocessed`;
-   - формирует вход в LLM напрямую из preprocessed-нод (`text`, `nodes[{id,name,pos_*,features,syntactic_link_target_id}]`);
-   - кладёт в очередь только ещё не обработанные `sentence_id`.
-5. Если очередь пустая — ранний выход.
-6. Создаются воркеры (`threading.Thread`, имя `Воркер-i`), каждый поднимает `requests.Session` с отключённым прокси (`trust_env = False`).
-7. Каждый воркер:
-   - забирает preprocessed-запись из очереди;
-   - до `MAX_RETRIES` раз:
-     - отправляет компактный JSON в `gemini_client.get_model_response()`;
-     - прогоняет ответ через `validator.validate_response(original, response['nodes'])`;
-     - при успехе пишет запись (с `model_name`) в `datasets/04_fixed/<split>.jsonl` под lock.
-8. Основной поток ждёт `task_queue.join()` и печатает, что работа завершена.
+## Основные файлы
 
-## Проверки и логи
+- `pipeline.py` — формирует очередь, строит payload для LLM и пишет `datasets/04_fixed/*.jsonl`
+- `scheduler.py` — однократный шедулер с пулом ключей и лимитами
+- `gemini_client.py` / `local_client.py` — клиенты моделей
+- `validator.py` — сравнивает ответ модели с compatibility-слоем и логирует ошибки в `logs/validator_errors.log`
 
-- `validator.validate_response()` гарантирует:
-  - `id` в ответе полностью совпадает с исходными (`set` сравнение).
-  - Выбранная `syntactic_link_name` входит в кандидатов для ноды (`syntactic_link_candidates` поддерживает оба формата — список словарей с `name` или просто имена).
-- При нарушении второго правила логирует JSON с подробным описанием ноды и текста в `logs/validator_errors.log` через выделенный логгер.
-- `file_locks` создаются лениво для каждого встреченного `output_filename` и устраняют гонки при одновременной записи потоков.
+## Ход пайплайна
 
-## Взаимодействие с локальным сервисом (`gemini_client.get_model_response`)
+1. `load_processed_ids()` собирает уже обработанные `sentence_id` из `datasets/04_fixed/*.jsonl`.
+2. `build_task_queue_from_preprocessed()` читает `datasets/02_preprocessed/*.json`.
+3. `_convert_nodes_for_llm()`:
+   - если есть `units`, строит payload из них;
+   - если `units` нет, использует legacy `nodes`.
+4. В payload для модели можно передавать:
+   - `surface`
+   - `core_lemma`
+   - `upos` / `xpos`
+   - `features`
+   - `syntactic_link_target_id`
+   - `original_deprel`
+   - `introduced_by`
+   - `attached_tokens`
+   - `ud_semantic_hints`
+   - `head_surface` / `head_lemma`
+5. `validator.validate_response()` сравнивает ответ модели с `legacy_nodes` или, для старого формата, с `nodes`.
+6. При успехе результат записывается в `datasets/04_fixed/<split>.jsonl`.
 
-- Собирает полный промпт: `BASE_PROMPT + json.dumps(sentence_data) + PROMPT_SUFFIX`.
-- Отправляет `POST` на `LOCAL_API_URL` с `{"text": "...промпт..."}`.
-- Берёт строку ответа из поля `response`, декодирует `json.loads`.
-- Все ошибки (отсутствие клиента, пустой ответ, `JSONDecodeError`) логируются в stdout; вызывающий воркер запускает повтор.
+## Проверки validator
+
+- набор `id` в ответе должен совпадать с compatibility-слоем;
+- выбранная `syntactic_link_name` должна входить в `syntactic_link_candidates`;
+- при нарушении второго правила ошибка логируется, но сейчас не делает ответ фатальным, потому что `return False` в этой ветке закомментирован.
 
 ## Быстрый запуск
 
 ```bash
-export GEMINI_API_KEYS="key1,key2"  # если нужно переопределить config (не обязателен для локального сервиса)
+export GEMINI_API_KEYS="key1,key2"
 python 03_gemini_fix_errors/pipeline.py
 ```
 
-Перед запуском убедитесь, что:
+Для локального сервиса:
 
-- в `datasets/02_preprocessed/` лежат `*.json` из этапа 01;
-- директории из `config/paths.py` существуют (создаются автоматически при импорте config);
-- локальный сервис доступен на `LOCAL_API_URL`;
-- лог `logs/validator_errors.log` доступен на запись (создаётся автоматически).
+```bash
+export GEMINI_REQUEST_STRATEGY=local
+python 03_gemini_fix_errors/pipeline.py
+```
 
-## Ежедневный шедулер
+## Шедулер
 
-- Конфигурация ключей: `config/generate_conf.ALL_KEYS_FOR_SHEDULE` (строка через запятую). После изменения перезапустите скрипт.
-- Параметры параллелизма и ограничений: `config/pipeline_conf` (`SCHEDULER_MAX_CONCURRENT_WORKERS`, `SCHEDULER_CONSECUTIVE_ERROR_LIMIT`, `SCHEDULER_DAILY_QUOTA`).
-- Запуск: `python 03_gemini_fix_errors/scheduler.py`. Скрипт один раз сканирует очередь, отрабатывает и завершает работу. Его можно дергать раз в день cron'ом.
-- Алгоритм держит ровно `N` активных воркеров (по умолчанию 4). Каждый воркер:
-  1. Берёт из пула очередной ключ и генерирует датасет, пока не получит сообщение о квоте/не достигнет лимита `SCHEDULER_DAILY_QUOTA`.
-  2. Останавливается, если 10 задач подряд завершились ошибкой (после всех `MAX_RETRIES`), при этом текущая задача возвращается в очередь.
-  3. После завершения ключ попадает в список использованных, воркер переключается на следующий ключ до тех пор, пока список не закончится.
-- В конце работы подсчитывается количество успешных запросов и пишется сводка в `logs/scheduler_summary.log`. Если ключи закончились раньше задач, оставшиеся предложения останутся в очереди для следующего запуска.
+Запуск:
+
+```bash
+python 03_gemini_fix_errors/scheduler.py
+```
+
+Конфиг задаётся через `config/pipeline_conf.py` и `config/generate_conf.py`:
+
+- `SCHEDULER_MAX_CONCURRENT_WORKERS`
+- `SCHEDULER_CONSECUTIVE_ERROR_LIMIT`
+- `SCHEDULER_DAILY_QUOTA`
+- `ALL_KEYS_FOR_SHEDULE`

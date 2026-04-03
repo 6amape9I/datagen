@@ -3,6 +3,7 @@ from collections import defaultdict
 import pprint
 
 from config import PREPROCESSED_DATA_DIR
+from utils.preprocessed_utils import get_legacy_nodes
 
 
 def analyze_dataset_features():
@@ -32,7 +33,7 @@ def analyze_dataset_features():
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
             for sentence in data:
-                for node in sentence.get("nodes", []):
+                for node in get_legacy_nodes(sentence):
                     # 1. Синтаксическая связь
                     if node.get("original_deprel"):
                         analytics["original_deprel"].add(node["original_deprel"])
