@@ -2,7 +2,9 @@
 import json
 from typing import Any, Dict, Optional, Tuple, Union
 
-from gemini_client_comp import generate
+from config import MODEL_NAME
+from prompt_builder import build_annotation_request_text
+from providers.google_genai_client import request_google_genai_response
 
 
 ReturnType = Union[Dict[str, Any], None, Tuple[Optional[Dict[str, Any]], Optional[str]]]
@@ -29,7 +31,7 @@ def get_model_response(
         return None
 
     try:
-        sentence_json_string = json.dumps(sentence_data, ensure_ascii=False, indent=2)
+        sentence_json_string = build_annotation_request_text(sentence_data)
     except (TypeError, AttributeError) as e:
         msg = f"❌ Ошибка при сборке промпта: {e}"
         if return_error:
@@ -38,9 +40,10 @@ def get_model_response(
         return None
 
     try:
-        full_response_text = generate(
+        full_response_text = request_google_genai_response(
             sentence_json_string,
             api_key=api_key,
+            model_name=MODEL_NAME,
             return_text=True,
         )
 

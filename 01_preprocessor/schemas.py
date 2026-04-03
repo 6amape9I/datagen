@@ -62,11 +62,11 @@ class SentenceRecord:
     source_file: str
     tokens: List[RawToken] = field(default_factory=list)
     units: List[SemanticUnit] = field(default_factory=list)
-    legacy_nodes: List[Dict[str, Any]] = field(default_factory=list)
+    legacy_nodes: Optional[List[Dict[str, Any]]] = None
     preprocessed_schema_version: int = PREPROCESSED_SCHEMA_VERSION
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "preprocessed_schema_version": self.preprocessed_schema_version,
             "sentence_id": self.sentence_id,
             "text": self.text,
@@ -75,8 +75,10 @@ class SentenceRecord:
             "source_file": self.source_file,
             "tokens": serialize_dataclass_list(self.tokens),
             "units": serialize_dataclass_list(self.units),
-            "legacy_nodes": self.legacy_nodes,
         }
+        if self.legacy_nodes is not None:
+            data["legacy_nodes"] = self.legacy_nodes
+        return data
 
 
 def serialize_dataclass_list(items: List[Any]) -> List[Any]:

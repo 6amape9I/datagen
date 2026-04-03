@@ -3,7 +3,7 @@ from collections import defaultdict
 import pprint
 
 from config import PREPROCESSED_DATA_DIR
-from utils.preprocessed_utils import get_legacy_nodes
+from utils.preprocessed_utils import get_units
 
 
 def analyze_dataset_features():
@@ -33,14 +33,14 @@ def analyze_dataset_features():
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
             for sentence in data:
-                for node in get_legacy_nodes(sentence):
+                for node in get_units(sentence):
                     # 1. Синтаксическая связь
                     if node.get("original_deprel"):
                         analytics["original_deprel"].add(node["original_deprel"])
 
                     # 2. Часть речи
-                    if node.get("pos_universal"):
-                        analytics["pos_universal"].add(node["pos_universal"])
+                    if node.get("upos"):
+                        analytics["pos_universal"].add(node["upos"])
 
                     # 3. Грамматические признаки (features)
                     features = node.get("features", {})
@@ -49,9 +49,9 @@ def analyze_dataset_features():
                             analytics[f"feature_{feature_name}"].add(feature_value)
 
                     # 4. Маркеры (предлоги, союзы)
-                    link_info = node.get("link_introduction_info")
-                    if link_info and link_info.get("marker_word"):
-                        analytics["marker_word"].add(link_info["marker_word"].lower())
+                    for link_info in node.get("introduced_by", []):
+                        if link_info.get("form"):
+                            analytics["marker_word"].add(str(link_info["form"]).lower())
 
     print("\n--- Результаты анализа ---")
     # Преобразуем множества в отсортированные списки для красивого вывода

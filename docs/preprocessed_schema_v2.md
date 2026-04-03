@@ -1,16 +1,16 @@
 # Stage 01 preprocessed schema v2
 
-Stage 01 now writes a versioned sentence structure in `datasets/02_preprocessed/*.json`.
+Stage 01 writes versioned records to `datasets/02_preprocessed/*.json`.
 
 ## Authority rules
 
 - `tokens` is the authoritative raw UD layer.
 - `units` is the authoritative normalized layer.
-- `legacy_nodes` is transitional compatibility output for downstream stages.
+- `legacy_nodes` is optional compat export only.
 
 ## Top-level sentence fields
 
-Each sentence record contains:
+Every record contains:
 
 - `preprocessed_schema_version`
 - `sentence_id`
@@ -20,11 +20,14 @@ Each sentence record contains:
 - `source_file`
 - `tokens`
 - `units`
-- `legacy_nodes`
+
+Optional fields:
+
+- `legacy_nodes` when `PREPROCESSOR_EXPORT_MODE=canonical+legacy`
 
 ## `tokens`
 
-`tokens` preserve near-lossless UD evidence for debugging and future model packaging.
+`tokens` preserve near-lossless UD evidence.
 
 Each raw token stores:
 
@@ -43,13 +46,13 @@ Each raw token stores:
 
 Notes:
 
-- multiword tokens and empty nodes remain visible in `tokens`;
-- punctuation remains visible in `tokens`;
-- `feats` and `misc` preserve multi-valued UD attributes as lists.
+- punctuation remains visible in `tokens`
+- multiword tokens and empty nodes remain visible in `tokens`
+- `feats` and `misc` preserve multi-valued UD attributes as lists
 
 ## `units`
 
-`units` are the normalized semantic units used by Stage 03.
+`units` is the canonical downstream contract.
 
 Each unit stores:
 
@@ -71,32 +74,26 @@ Each unit stores:
 
 Notes:
 
-- function words are attached reversibly, not deleted;
-- `span_token_ids` lets you trace every unit back to raw UD tokens;
-- `introduced_by` is for adpositions and clause introducers;
-- `semantic_candidates_soft` is heuristic and non-binding.
+- function words are attached reversibly, not deleted
+- `span_token_ids` lets you trace every unit back to raw tokens
+- `introduced_by` stores introducer-like markers/adpositions
+- `semantic_candidates_soft` is diagnostic and non-binding
 
 ## `legacy_nodes`
 
-`legacy_nodes` keeps Stage 03 validator and Stage 04 postprocessor compatible while the migration is in progress.
+`legacy_nodes` is no longer required by the normal pipeline.
 
-It preserves the old node shape:
+It exists only for:
 
-- `id`
-- `name`
-- `lemma`
-- `pos_universal`
-- `pos_specific`
-- `features`
-- `syntactic_link_candidates`
-- `syntactic_link_target_id`
-- `original_deprel`
-- optional `link_introduction_info`
-- optional `function_parts`
+- migration comparisons
+- old dataset compatibility
+- explicit debug export
+
+Normal Stage 03/04 behavior must not depend on it.
 
 ## Downstream behavior
 
-- `03_gemini_fix_errors/pipeline.py` prefers `units` for model input.
-- `03_gemini_fix_errors/validator.py` validates against `legacy_nodes`.
-- `04_postprocessor/prepare_final_dataset.py` reads `legacy_nodes`.
-- `02_local_generation/pipeline.py` uses `legacy_nodes` only to compare expected node counts.
+- `03_gemini_fix_errors/pipeline.py` builds model input from `units`
+- `03_gemini_fix_errors/validator.py` validates against `units` and the shared ontology
+- `04_postprocessor/prepare_final_dataset.py` builds final output from `units`
+- `02_local_generation/pipeline.py` uses `units` for expected node count

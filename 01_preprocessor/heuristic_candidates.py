@@ -60,11 +60,11 @@ def _generate_candidates_from_rules(
         if not conditions:
             conditions_met = True
         else:
-            conditions_met = False
+            conditions_met = True
             for cond_key, cond_value in conditions.items():
                 value_to_check = token_features.get(cond_key)
-                if _check_condition(value_to_check, cond_value, cond_key):
-                    conditions_met = True
+                if not _check_condition(value_to_check, cond_value, cond_key):
+                    conditions_met = False
                     break
 
         if not conditions_met:

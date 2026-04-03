@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -6,13 +7,22 @@ from config import PROCESSOR_LOG_PATH
 from report import get_and_reset_report
 from sentence_builder import process_conllu_file
 
-logging.basicConfig(
-    level=logging.WARNING,
-    filename=PROCESSOR_LOG_PATH,
-    filemode="w",
-    encoding="utf-8",
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+
+def _build_logger() -> logging.Logger:
+    logger = logging.getLogger("stage01_preprocessor")
+    if logger.handlers:
+        return logger
+
+    handler = logging.FileHandler(PROCESSOR_LOG_PATH, mode="w", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+
+logger = _build_logger()
 
 def get_and_reset_fallback_any_count() -> int:
     return get_and_reset_report().legacy_candidate_fallback_count
@@ -27,6 +37,10 @@ def process_syntagrus_file(
 ) -> List[Dict[str, Any]]:
     print(f"Обработка файла: {filepath.name}...")
     try:
+        export_mode = os.environ.get("PREPROCESSOR_EXPORT_MODE", "canonical").strip().lower()
+        enable_soft_candidates = os.environ.get("ENABLE_SOFT_CANDIDATES", "").strip().lower() in {"1", "true", "yes"}
+        enable_legacy_candidates = os.environ.get("ENABLE_LEGACY_CANDIDATES", "").strip().lower() in {"1", "true", "yes"}
+        allow_legacy_candidate_fallback = os.environ.get("ENABLE_LEGACY_CANDIDATE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}
         inferred_language_code = language_code or source_filename.split("_", 1)[0]
         inferred_split_name = split_name or (
             "train" if "train" in filepath.name.lower()
@@ -41,9 +55,12 @@ def process_syntagrus_file(
             split=inferred_split_name,
             source_file=source_filename,
             sentence_limit=sentence_limit,
-            enable_legacy_candidates=True,
+            export_mode=export_mode,
+            enable_soft_candidates=enable_soft_candidates,
+            enable_legacy_candidates=enable_legacy_candidates,
+            allow_legacy_candidate_fallback=allow_legacy_candidate_fallback,
         )
     except Exception as exc:
-        logging.exception("Ошибка Stage 01 при обработке файла %s: %s", filepath.name, exc)
+        logger.exception("Ошибка Stage 01 при обработке файла %s: %s", filepath.name, exc)
         print(f"Ошибка при загрузке файла {filepath.name}: {exc}")
         return []

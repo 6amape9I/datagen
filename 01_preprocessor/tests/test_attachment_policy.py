@@ -47,3 +47,15 @@ def test_attachment_policy_preserves_semantic_dependents() -> None:
     decision = decide_attachment(subject, token_map, language_code="eng")
 
     assert decision.action == "preserve"
+
+
+def test_attachment_policy_uses_language_profiles_for_determiners() -> None:
+    head = _token("2", "livre", "NOUN", "0", "root")
+    det = _token("1", "Le", "DET", "2", "det")
+    token_map = {"1": det, "2": head}
+
+    article_lang_decision = decide_attachment(det, token_map, language_code="fra")
+    articleless_lang_decision = decide_attachment(det, token_map, language_code="rus")
+
+    assert article_lang_decision.action == "attach"
+    assert articleless_lang_decision.action == "preserve"

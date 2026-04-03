@@ -71,5 +71,5 @@ def test_multilingual_smoke_examples_build_v2_records(tmp_path: Path) -> None:
         assert record["preprocessed_schema_version"] == 2
         assert record["tokens"]
         assert record["units"]
-        assert len(record["legacy_nodes"]) == len(record["units"])
         assert all("span_token_ids" in unit for unit in record["units"])
+        assert "legacy_nodes" not in record

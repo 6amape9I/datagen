@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sentence_builder import process_conllu_file
+from sentence_builder import EXPORT_MODE_CANONICAL_WITH_LEGACY, process_conllu_file
 
 
 def test_legacy_export_keeps_stage03_contract(tmp_path: Path) -> None:
@@ -22,6 +22,8 @@ def test_legacy_export_keeps_stage03_contract(tmp_path: Path) -> None:
         language_code="eng",
         split="val",
         source_file="eng_sample-dev.conllu",
+        export_mode=EXPORT_MODE_CANONICAL_WITH_LEGACY,
+        enable_legacy_candidates=True,
     )[0]
 
     nodes = record["legacy_nodes"]

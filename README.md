@@ -1,184 +1,90 @@
 # akin_core_datagen
 
-Пайплайн подготовки датасета для семантической разметки синтаксических связей на основе корпусов в формате CoNLL-U. Основные этапы: Stage 01 подготавливает versioned preprocessed JSON, Stage 03 получает `syntactic_link_name` от модели, Stage 04 собирает финальный `input/output`-датасет.
+Пайплайн подготовки датасета для семантической разметки синтаксических связей на базе корпусов в формате CoNLL-U.
+
+Текущее целевое состояние:
+
+- `tokens` — raw authoritative UD layer
+- `units` — canonical normalized layer
+- Stage 03 и Stage 04 работают по `units`
+- `legacy_nodes` не нужен в normal path и включается только как compat export
 
 ## Поток данных
 
 `01_preprocessor` -> `datasets/02_preprocessed` -> `03_gemini_fix_errors` -> `datasets/04_fixed` -> `04_postprocessor` -> `datasets/05_final`
 
-`02_local_generation` существует отдельно и пишет в `datasets/03_local_generated`, но не является обязательным звеном для сборки финального датасета.
-
-## Структура репозитория
-
-```text
-.
-├── 01_preprocessor/          # UD reader, token normalizer, unit builder, legacy export
-├── 02_local_generation/      # Локальный inference по preprocessed JSON
-├── 03_gemini_fix_errors/     # Подготовка model input и разметка через Gemini / local service
-├── 04_postprocessor/         # Сборка финального training dataset
-├── config/                   # Пути, промпты, модели, лимиты, semantic mappings
-├── datasets/
-│   ├── 01_raw_corpus/
-│   ├── 02_preprocessed/
-│   ├── 03_local_generated/
-│   ├── 04_fixed/
-│   └── 05_final/
-├── docs/
-├── logs/
-└── utils/
-```
+`02_local_generation` остаётся вспомогательным локальным прогоном и сравнивает размер ответа с canonical `units`.
 
 ## Stage 01
 
 Точка входа: [`01_preprocessor/main.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/01_preprocessor/main.py)
 
-Stage 01 больше не пытается быть источником истины для `syntactic_link_name`. Теперь он:
+Stage 01 теперь:
 
-- читает `.conllu` через `pyconll`;
-- сохраняет сырой слой `tokens` почти без потерь;
-- строит нормализованный слой `units` с обратимыми attachment'ами вместо разрушительных merge;
-- добавляет `ud_semantic_hints`;
-- добавляет необязательные `semantic_candidates_soft`;
-- экспортирует `legacy_nodes` для совместимости с текущими Stage 03/04.
+- читает `.conllu` через `pyconll`
+- сохраняет сырой слой `tokens`
+- строит обратимые `units`
+- добавляет `ud_semantic_hints`
+- может добавлять `semantic_candidates_soft` как диагностический слой
+- умеет отдельно включать compat export `legacy_nodes`
 
-Правила авторитетности:
+Схема v2: [`docs/preprocessed_schema_v2.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/docs/preprocessed_schema_v2.md)
 
-- `tokens` — authoritative raw layer;
-- `units` — authoritative normalized layer;
-- `legacy_nodes` — transitional compatibility layer.
+### Export modes
 
-Подробная схема: [`docs/preprocessed_schema_v2.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/docs/preprocessed_schema_v2.md)
+Stage 01 управляется переменными окружения:
 
-Пример v2-записи:
+- `PREPROCESSOR_EXPORT_MODE=canonical` — только `tokens` и `units` (режим по умолчанию)
+- `PREPROCESSOR_EXPORT_MODE=canonical+legacy` — дополнительно пишет `legacy_nodes`
+- `ENABLE_SOFT_CANDIDATES=true` — включает `semantic_candidates_soft`
+- `ENABLE_LEGACY_CANDIDATES=true` — добавляет candidates в `legacy_nodes`
+- `ENABLE_LEGACY_CANDIDATE_FALLBACK=true` — включает fallback-all только для compat/debug сценариев
 
-```json
-{
-  "preprocessed_schema_version": 2,
-  "sentence_id": "eng_en_gum-ud-train.conllu_1",
-  "text": "The city in France",
-  "language_code": "eng",
-  "split": "train",
-  "source_file": "eng_en_gum-ud-train.conllu",
-  "tokens": [
-    {
-      "token_id": "1",
-      "form": "The",
-      "lemma": "the",
-      "upos": "DET",
-      "xpos": "DT",
-      "head_token_id": "2",
-      "deprel": "det"
-    }
-  ],
-  "units": [
-    {
-      "unit_id": "w2",
-      "head_token_id": "2",
-      "span_token_ids": ["1", "2"],
-      "surface": "The city",
-      "core_lemma": "city",
-      "upos": "NOUN",
-      "xpos": "NN",
-      "features": {"Number": "Sing"},
-      "syntactic_link_target_id": null,
-      "original_deprel": "root",
-      "attached_tokens": [],
-      "introduced_by": [],
-      "function_parts": [],
-      "ud_semantic_hints": ["determiner_attached", "nominal_head", "root_nominal", "root_unit"],
-      "semantic_candidates_soft": ["ROOT"]
-    }
-  ],
-  "legacy_nodes": [
-    {
-      "id": "w2",
-      "name": "city",
-      "lemma": "city",
-      "pos_universal": "NOUN",
-      "pos_specific": "NN",
-      "features": {"Number": "Sing"},
-      "syntactic_link_candidates": ["ROOT"],
-      "syntactic_link_target_id": null,
-      "original_deprel": "root"
-    }
-  ]
-}
-```
-
-## Downstream stages
-
-### `02_local_generation`
-
-Точка входа: [`02_local_generation/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/02_local_generation/pipeline.py)
-
-- читает `datasets/02_preprocessed/*.json`;
-- отправляет только `text` в локальный inference-сервис;
-- сравнивает размер ответа с ожидаемым числом `legacy_nodes`;
-- пишет JSONL в `datasets/03_local_generated`.
-
-### `03_gemini_fix_errors`
+## Stage 03
 
 Точки входа:
 
 - [`03_gemini_fix_errors/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/pipeline.py)
 - [`03_gemini_fix_errors/scheduler.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/scheduler.py)
 
-Stage 03 теперь предпочитает `units` для model input. В payload можно передавать:
+Stage 03:
 
-- `surface`
-- `core_lemma`
-- `upos` / `xpos`
-- `features`
-- `syntactic_link_target_id`
-- `original_deprel`
-- `introduced_by`
-- `attached_tokens`
-- `ud_semantic_hints`
-- `head_surface` / `head_lemma`
+- строит model input только из `units`
+- валидирует ответ только по canonical units и общей онтологии ролей
+- не использует `syntactic_link_candidates` как обязательный gatekeeper
+- разрешает `ROOT` только для unit с `syntactic_link_target_id = null`
 
-Валидация остаётся на compatibility-слое и сравнивает ответ с `legacy_nodes[*].id` и `legacy_nodes[*].syntactic_link_candidates`.
+Model layer очищен по ответственности:
 
-### `04_postprocessor`
+- transport вынесен в [`03_gemini_fix_errors/providers/`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/providers)
+- request text собирается в [`prompt_builder.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/prompt_builder.py)
+- response roles берутся из общей онтологии через [`response_schema.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/response_schema.py)
+- имя модели берётся из `config.generate_conf.MODEL_NAME`, а не hardcoded в клиенте
+
+## Stage 04
 
 Точка входа: [`04_postprocessor/prepare_final_dataset.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/04_postprocessor/prepare_final_dataset.py)
 
-Stage 04 читает `legacy_nodes` из preprocessed JSON, сопоставляет их с `datasets/04_fixed/*.jsonl` и формирует финальный датасет в `datasets/05_final`.
+Stage 04 собирает финальный датасет из canonical `units`:
+
+- `id = unit_id`
+- `name = surface`
+- `pos_universal = upos`
+- `case = features.get("Case")`
+- `syntactic_link_target_id` из `units`
+- `syntactic_link_name` из model output
 
 ## Конфигурация
 
 Ключевые файлы:
 
-- [`config/paths.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/paths.py) — все пути к данным и логам
-- [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py) — модель, URL локальных сервисов, строки с ключами
-- [`config/pipeline_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/pipeline_conf.py) — стратегия запросов, воркеры, retry, лимиты шедулера
-- [`config/prompts.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/prompts.py) — системные и пользовательские промпты
-- [`config/semantic.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/semantic.py) — legacy heuristic candidate logic и карта semantic relations
-
-Поддерживаемые переменные окружения:
-
-- `GEMINI_API_KEYS="key1,key2"`
-- `GEMINI_REQUEST_STRATEGY=genai|local`
-- `SCHEDULER_WORKERS=4`
-- `SCHEDULER_ERROR_LIMIT=10`
-- `SCHEDULER_DAILY_QUOTA=250`
-
-Локальные endpoint'ы по умолчанию:
-
-- `LOCAL_INFER_URL = http://127.0.0.1:8000/infer`
-- `LOCAL_API_URL = http://127.0.0.1:8080/generate`
+- [`config/paths.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/paths.py)
+- [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py)
+- [`config/pipeline_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/pipeline_conf.py)
+- [`config/prompts.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/prompts.py)
+- [`config/semantic.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/semantic.py)
 
 ## Установка
-
-Требования:
-
-- Python 3.12+
-- `pyconll`
-- `google-genai`
-- `tqdm`
-- `requests`
-- `pytest`
-
-Быстрый старт:
 
 ```bash
 python -m venv .venv
@@ -187,8 +93,6 @@ pip install pyconll google-genai tqdm requests pytest
 ```
 
 ## Команды
-
-Запускать из корня репозитория.
 
 ```bash
 python 01_preprocessor/main.py
@@ -202,7 +106,7 @@ python -m pytest 01_preprocessor/tests -q
 
 ## Данные
 
-Ожидаемая структура исходных корпусов:
+Исходные корпуса ожидаются в:
 
 ```text
 datasets/01_raw_corpus/
@@ -211,7 +115,7 @@ datasets/01_raw_corpus/
 └── rus/
 ```
 
-Язык определяется по имени подпапки, а split по имени файла:
+Split определяется по имени файла:
 
 - `*train*.conllu` -> `train`
 - `*dev*.conllu` или `*val*.conllu` -> `val`
@@ -219,15 +123,14 @@ datasets/01_raw_corpus/
 
 ## Логи
 
-- `logs/processor_fallback.log` — fallback-all для `legacy_nodes[*].syntactic_link_candidates`
-- `logs/local_generation_errors.log` — ошибки локальной генерации и mismatch числа узлов
-- `logs/validator_errors.log` — ошибки выбора связи вне списка кандидатов
-- `logs/scheduler_summary.log` — итоговые отчёты шедулера
+- `logs/processor_fallback.log` — fallback summary для compat/export режима
+- `logs/local_generation_errors.log` — ошибки локальной генерации и node-count mismatch
+- `logs/validator_errors.log` — ontology/id validation errors
+- `logs/scheduler_summary.log` — сводка шедулера
 
-## Ограничения и особенности
+## Ограничения и заметки
 
-- `legacy_nodes` остаётся переходным слоем совместимости; canonical слой Stage 01 — это `units`
-- `03_gemini_fix_errors` всё ещё не использует `datasets/03_local_generated`
-- `validator.py` логирует ошибку выбора связи вне кандидатов, но фактически не отклоняет такой ответ, потому что `return False` в этой ветке закомментирован
-- `04_postprocessor` собирает итог только по тем записям, которые есть и в `02_preprocessed`, и в `04_fixed`
-- ключи лучше держать в переменных окружения, а не в [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py)
+- каталог `03_gemini_fix_errors` пока сохраняет историческое имя, но его внутренний model layer уже разбит на нейтральные provider/prompt/schema компоненты
+- `legacy_nodes` остаётся только для explicit compat export, а не как обязательный слой
+- `semantic_candidates_soft` и fallback-all не участвуют в корректности downstream pipeline
+- для реальной эксплуатации API keys лучше держать в переменных окружения, а не в [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py)

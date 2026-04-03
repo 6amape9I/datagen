@@ -22,7 +22,7 @@ from config import (
     LOCAL_INFER_URL,
     LOCAL_GENERATION_LOG_PATH,
 )
-from utils.preprocessed_utils import get_legacy_nodes
+from utils.preprocessed_utils import get_units
 
 # --- proxy safety: never proxy localhost ---
 _proxy_handler = urllib.request.ProxyHandler({})
@@ -176,7 +176,7 @@ def process_file(preprocessed_path: Path, output_path: Path) -> None:
                 continue
 
             text = sentence_data.get("text", "")
-            expected_nodes_len = len(get_legacy_nodes(sentence_data))
+            expected_nodes_len = len(get_units(sentence_data))
 
             nodes, error_text = request_inference(sentence_data)
 

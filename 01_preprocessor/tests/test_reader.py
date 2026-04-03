@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from reader import detect_split_from_filename, discover_language_configs
+from sentence_builder import EXPORT_MODE_CANONICAL_WITH_LEGACY
 from sentence_builder import process_conllu_file
 
 
@@ -45,6 +46,7 @@ def test_process_conllu_file_emits_v2_sentence_metadata(tmp_path: Path) -> None:
         language_code="eng",
         split="train",
         source_file="eng_sample-train.conllu",
+        export_mode=EXPORT_MODE_CANONICAL_WITH_LEGACY,
     )
 
     record = records[0]

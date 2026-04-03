@@ -28,12 +28,40 @@ PRESERVE_DEPRELS = {
     "vocative",
 }
 
+ARTICLE_HEAVY_LANGUAGES = {
+    "dan", "deu", "eng", "fra", "ita", "nld", "nor", "por", "spa", "swe",
+}
+SLAVIC_RICH_INFLECTION_LANGUAGES = {
+    "bel", "bul", "ces", "hrv", "pol", "rus", "slk", "slv", "ukr",
+}
+FINNIC_LANGUAGES = {"est", "fin"}
+CJK_LANGUAGES = {"jpn", "kor", "lzh", "zho"}
+SEMITIC_LANGUAGES = {"heb"}
+ARMENIAN_LANGUAGES = {"arm", "hye", "hy"}
+
 
 @dataclass(slots=True)
 class AttachmentDecision:
     action: str
     attachment_type: Optional[str] = None
     reason: Optional[str] = None
+
+
+def get_language_profile(language_code: str) -> str:
+    code = (language_code or "").strip().lower()
+    if code in ARTICLE_HEAVY_LANGUAGES:
+        return "article_heavy"
+    if code in SLAVIC_RICH_INFLECTION_LANGUAGES:
+        return "slavic_rich_inflection"
+    if code in FINNIC_LANGUAGES:
+        return "finnic_rich_case"
+    if code in CJK_LANGUAGES:
+        return "cjk_low_morphology"
+    if code in SEMITIC_LANGUAGES:
+        return "semitic"
+    if code in ARMENIAN_LANGUAGES:
+        return "armenian"
+    return "base"
 
 
 def classify_attachment_type(token: RawToken) -> str:
@@ -74,7 +102,7 @@ def decide_attachment(
     *,
     language_code: str,
 ) -> AttachmentDecision:
-    del language_code
+    profile = get_language_profile(language_code)
 
     if not token.is_integer_id:
         return AttachmentDecision(action="skip", reason="non_integer_token_id")
@@ -91,12 +119,25 @@ def decide_attachment(
         return AttachmentDecision(action="attach", attachment_type=classify_attachment_type(token), reason="safe_attach")
 
     if token.deprel == "det":
-        return AttachmentDecision(action="attach", attachment_type="determiner", reason="determiner")
+        if profile in {"article_heavy", "base"}:
+            return AttachmentDecision(action="attach", attachment_type="determiner", reason="determiner_attach")
+        return AttachmentDecision(action="preserve", attachment_type="determiner", reason="determiner_preserve")
 
     if token.deprel in CONTEXTUAL_ATTACH_DEPRELS:
+        if token.deprel in {"aux", "cop"}:
+            return AttachmentDecision(action="preserve", attachment_type=classify_attachment_type(token), reason="predicate_structure")
+        if token.deprel == "compound" and profile in {"slavic_rich_inflection", "finnic_rich_case"}:
+            return AttachmentDecision(action="preserve", attachment_type=classify_attachment_type(token), reason="compound_preserve")
         return AttachmentDecision(action="attach", attachment_type=classify_attachment_type(token), reason="contextual_attach")
 
     if token.upos == "PART":
+        if profile in {"cjk_low_morphology", "article_heavy"}:
+            return AttachmentDecision(action="attach", attachment_type="particle", reason="particle_attach")
+        if token.deprel in {"advmod", "mark"}:
+            return AttachmentDecision(action="attach", attachment_type="particle", reason="particle_attach")
+        return AttachmentDecision(action="preserve", attachment_type="particle", reason="particle_preserve")
+
+    if token.upos == "ADP" and token.deprel == "case" and profile == "cjk_low_morphology":
         return AttachmentDecision(action="attach", attachment_type="particle", reason="particle_attach")
 
     if token.upos == "SYM" and token.deprel in {"dep", "discourse", "compound"}:

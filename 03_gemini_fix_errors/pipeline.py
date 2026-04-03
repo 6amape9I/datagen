@@ -19,13 +19,12 @@ from config import (
     INITIAL_BACKOFF_DELAY,
     PREPROCESSED_DATA_DIR,
     FIXED_DATA_DIR,
-    LOCAL_API_URL,
     REQUEST_STRATEGY,
 )
-from gemini_client_comp import generate
+from gemini_client import get_model_response
 from local_client import get_local_model_response
 from validator import validate_response
-from utils.preprocessed_utils import get_legacy_nodes, get_model_input_units
+from utils.preprocessed_utils import get_model_input_units
 
 # --- НАСТРОЙКИ ПАЙПЛАЙНА УДАЛЕНЫ, ТЕПЕРЬ ВСЕ В CONFIG ---
 
@@ -35,42 +34,6 @@ file_locks: Dict[str, threading.Lock] = {}
 
 def get_file_lock(output_filename: str) -> threading.Lock:
     return file_locks.setdefault(output_filename, threading.Lock())
-
-
-def get_model_response(api_key: str, sentence_data: Dict[str, Any]) -> Dict[str, Any] | None:
-    """
-    GenAI-клиент для pipeline: напрямую использует функцию generate()
-    из gemini_client_comp (армянский промпт/схема).
-    """
-    if not api_key:
-        print("❌ Ошибка: не передан API ключ для GenAI.")
-        return None
-
-    try:
-        sentence_json_string = json.dumps(sentence_data, ensure_ascii=False, indent=2)
-    except (TypeError, AttributeError) as exc:
-        print(f"❌ Ошибка при сборке промпта: {exc}")
-        return None
-
-    full_response_text = ""
-    try:
-        full_response_text = generate(
-            sentence_json_string,
-            api_key=api_key,
-            return_text=True,
-        )
-        if not full_response_text:
-            print("  - 🟡 Ответ от GenAI пустой.")
-            return None
-        return json.loads(full_response_text)
-    except json.JSONDecodeError:
-        print(f"❌ Ошибка декодирования JSON. Ответ от GenAI:\n{full_response_text}")
-        return None
-    except Exception as exc:
-        print(f"❌ Непредвиденная ошибка во время запроса к GenAI: {exc}")
-        return None
-
-
 def load_processed_ids(output_dir: Path) -> Set[str]:
     """Сканирует .jsonl файлы и возвращает множество уже обработанных sentence_id."""
     processed_ids = set()
@@ -130,45 +93,31 @@ def _convert_nodes_for_llm(preprocessed_sentence: Dict[str, Any]) -> Dict[str, A
     """
     llm_nodes = []
     model_units = get_model_input_units(preprocessed_sentence)
-    unit_map = {unit.get("unit_id") or unit.get("id"): unit for unit in model_units if isinstance(unit, dict)}
+    unit_map = {unit.get("unit_id"): unit for unit in model_units if isinstance(unit, dict) and unit.get("unit_id")}
 
     for unit in model_units:
-        if "unit_id" in unit:
-            target_id = unit.get("syntactic_link_target_id")
-            head_surface = None
-            head_lemma = None
-            if target_id and isinstance(unit_map.get(target_id), dict):
-                head_surface = unit_map[target_id].get("surface")
-                head_lemma = unit_map[target_id].get("core_lemma")
-
-            llm_nodes.append(
-                {
-                    "id": unit.get("unit_id"),
-                    "name": unit.get("surface"),
-                    "surface": unit.get("surface"),
-                    "core_lemma": unit.get("core_lemma"),
-                    "pos_universal": unit.get("upos"),
-                    "pos_specific": unit.get("xpos"),
-                    "features": unit.get("features", {}),
-                    "syntactic_link_target_id": target_id,
-                    "original_deprel": unit.get("original_deprel"),
-                    "introduced_by": unit.get("introduced_by", []),
-                    "attached_tokens": unit.get("attached_tokens", []),
-                    "ud_semantic_hints": unit.get("ud_semantic_hints", []),
-                    "head_surface": head_surface,
-                    "head_lemma": head_lemma,
-                }
-            )
-            continue
-
+        target_id = unit.get("syntactic_link_target_id")
+        head_surface = None
+        head_lemma = None
+        if target_id and isinstance(unit_map.get(target_id), dict):
+            head_surface = unit_map[target_id].get("surface")
+            head_lemma = unit_map[target_id].get("core_lemma")
         llm_nodes.append(
             {
-                "id": unit.get("id"),
-                "name": unit.get("name"),
-                "pos_universal": unit.get("pos_universal"),
-                "pos_specific": unit.get("pos_specific"),
+                "id": unit.get("unit_id"),
+                "name": unit.get("surface"),
+                "surface": unit.get("surface"),
+                "core_lemma": unit.get("core_lemma"),
+                "pos_universal": unit.get("upos"),
+                "pos_specific": unit.get("xpos"),
                 "features": unit.get("features", {}),
-                "syntactic_link_target_id": unit.get("syntactic_link_target_id"),
+                "syntactic_link_target_id": target_id,
+                "original_deprel": unit.get("original_deprel"),
+                "introduced_by": unit.get("introduced_by", []),
+                "attached_tokens": unit.get("attached_tokens", []),
+                "ud_semantic_hints": unit.get("ud_semantic_hints", []),
+                "head_surface": head_surface,
+                "head_lemma": head_lemma,
             }
         )
 
@@ -195,12 +144,6 @@ def _iter_preprocessed_sentences(filepath: Path):
     for item in data:
         if isinstance(item, dict):
             yield item
-
-
-def _get_validation_nodes(preprocessed_sentence: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return get_legacy_nodes(preprocessed_sentence)
-
-
 def worker(q: Queue, key_cycler):
     """Функция-обработчик для каждого потока."""
     api_key = next(key_cycler)
@@ -240,9 +183,7 @@ def worker(q: Queue, key_cycler):
                 #time.sleep(10)
 
                 # 3. Валидацию проводим с ОРИГИНАЛЬНЫМИ данными, чтобы логировать детали узла
-                validation_sentence = dict(original_sentence_data)
-                validation_sentence["nodes"] = _get_validation_nodes(original_sentence_data)
-                if response_json and 'nodes' in response_json and validate_response(validation_sentence, response_json['nodes']):
+                if response_json and 'nodes' in response_json and validate_response(original_sentence_data, response_json['nodes']):
                     final_record = {
                         "sentence_id": original_sentence_data['sentence_id'],
                         "text": original_sentence_data['text'],

@@ -69,5 +69,5 @@ def test_unit_builder_handles_non_integer_tokens_predictably() -> None:
     units, _ = build_units(raw_tokens, language_code="eng")
 
     assert raw_tokens[0].is_integer_id is False
-    assert [unit.unit_id for unit in units] == ["w3"]
+    assert [unit.unit_id for unit in units] == ["w1", "w3"]
     assert any(token.token_id == "1-2" for token in raw_tokens)

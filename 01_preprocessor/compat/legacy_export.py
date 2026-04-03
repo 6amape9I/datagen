@@ -32,15 +32,18 @@ def export_legacy_nodes(
     units: List[SemanticUnit],
     token_map: Dict[str, RawToken],
     *,
-    include_candidates: bool = True,
+    include_candidates: bool = False,
+    allow_global_fallback: bool = False,
 ) -> List[Dict[str, Any]]:
     legacy_nodes: List[Dict[str, Any]] = []
     for unit in units:
-        candidates = generate_soft_candidates(
-            unit,
-            token_map,
-            include_global_fallback=include_candidates,
-        )
+        candidates = []
+        if include_candidates:
+            candidates = generate_soft_candidates(
+                unit,
+                token_map,
+                include_global_fallback=allow_global_fallback,
+            )
         node = {
             "id": unit.unit_id,
             "name": _legacy_name(unit, token_map),

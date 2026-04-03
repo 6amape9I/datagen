@@ -26,11 +26,42 @@ def get_units(sentence_record: Dict[str, Any]) -> List[Dict[str, Any]]:
     units = sentence_record.get("units")
     if isinstance(units, list):
         return [unit for unit in units if isinstance(unit, dict)]
-    return []
+    legacy_nodes = get_legacy_nodes(sentence_record)
+    if not legacy_nodes:
+        return []
+
+    canonical_units: List[Dict[str, Any]] = []
+    for node in legacy_nodes:
+        canonical_units.append(
+            {
+                "unit_id": node.get("id"),
+                "head_token_id": None,
+                "span_token_ids": [],
+                "surface": node.get("name"),
+                "core_lemma": node.get("lemma"),
+                "upos": node.get("pos_universal"),
+                "xpos": node.get("pos_specific"),
+                "features": node.get("features", {}),
+                "syntactic_link_target_id": node.get("syntactic_link_target_id"),
+                "original_deprel": node.get("original_deprel"),
+                "attached_tokens": [],
+                "introduced_by": [],
+                "function_parts": [],
+                "ud_semantic_hints": [],
+                "semantic_candidates_soft": node.get("syntactic_link_candidates", []),
+            }
+        )
+    return canonical_units
+
+
+def get_unit_map(sentence_record: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    units = get_units(sentence_record)
+    return {
+        str(unit.get("unit_id")): unit
+        for unit in units
+        if isinstance(unit, dict) and unit.get("unit_id")
+    }
 
 
 def get_model_input_units(sentence_record: Dict[str, Any]) -> List[Dict[str, Any]]:
-    units = get_units(sentence_record)
-    if units:
-        return units
-    return get_legacy_nodes(sentence_record)
+    return get_units(sentence_record)

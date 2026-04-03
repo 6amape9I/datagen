@@ -1,17 +1,9 @@
-# postprocess/prepare_final_dataset.py
-
-# Добавляем sys.path для корректного импорта 'config' из родительской директории
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.parent))
-
 import json
 from tqdm import tqdm
 
 # --- 1. Импортируем пути из централизованного конфига ---
 from config.paths import PREPROCESSED_DATA_DIR, FIXED_DATA_DIR, FINAL_DATASET_DIR
-from utils.preprocessed_utils import get_legacy_nodes
+from utils.preprocessed_utils import get_units
 
 
 def prepare_final_dataset():
@@ -66,7 +58,7 @@ def prepare_final_dataset():
                         source_record = source_map.get(sentence_id)
                         if not source_record: continue
                         battle_nodes = battle_record.get("nodes", [])
-                        source_nodes = get_legacy_nodes(source_record)
+                        source_nodes = get_units(source_record)
                         if len(battle_nodes) != len(source_nodes):
                             print(
                                 f"  - ⚠️  Пропуск sentence_id={sentence_id}: "
@@ -75,7 +67,7 @@ def prepare_final_dataset():
                             )
                             continue
                         battle_ids = {node.get("id") for node in battle_nodes}
-                        source_ids = {node.get("id") for node in source_nodes}
+                        source_ids = {node.get("unit_id") for node in source_nodes}
                         if battle_ids != source_ids:
                             print(
                                 f"  - ⚠️  Пропуск sentence_id={sentence_id}: "
@@ -85,13 +77,13 @@ def prepare_final_dataset():
                         annotated_nodes_map = {node['id']: node for node in battle_nodes}
                         transformed_nodes = []
                         for source_node in source_nodes:
-                            node_id = source_node['id']
+                            node_id = source_node['unit_id']
                             annotated_node = annotated_nodes_map.get(node_id)
                             if not annotated_node: continue
                             case_value = source_node.get('features', {}).get('Case')
                             new_node = {
-                                "id": source_node.get('id'), "name": source_node.get('name'),
-                                "pos_universal": source_node.get('pos_universal'),
+                                "id": source_node.get('unit_id'), "name": source_node.get('surface'),
+                                "pos_universal": source_node.get('upos'),
                                 "case": case_value,
                                 "syntactic_link_name": annotated_node.get('syntactic_link_name'),
                                 "syntactic_link_target_id": source_node.get('syntactic_link_target_id')
