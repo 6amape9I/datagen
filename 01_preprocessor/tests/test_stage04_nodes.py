@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from prepare_final_dataset import prepare_final_dataset
 
 
-def test_stage04_builds_final_dataset_from_units(tmp_path: Path, monkeypatch) -> None:
+def test_stage04_builds_final_dataset_from_compact_nodes(tmp_path: Path, monkeypatch) -> None:
     source_dir = tmp_path / "preprocessed"
     fixed_dir = tmp_path / "fixed"
     final_dir = tmp_path / "final"
@@ -16,27 +15,30 @@ def test_stage04_builds_final_dataset_from_units(tmp_path: Path, monkeypatch) ->
 
     source_record = [
         {
-            "preprocessed_schema_version": 2,
             "sentence_id": "eng_sample_1",
             "text": "The city in France",
             "language_code": "eng",
             "split": "train",
             "source_file": "eng_sample.conllu",
-            "tokens": [],
-            "units": [
+            "nodes": [
                 {
-                    "unit_id": "w2",
-                    "surface": "The city",
-                    "upos": "NOUN",
+                    "id": "w2",
+                    "name": "The city",
+                    "lemma": "city",
+                    "pos_universal": "NOUN",
                     "features": {"Case": "Nom"},
                     "syntactic_link_target_id": None,
+                    "original_deprel": "root",
                 },
                 {
-                    "unit_id": "w4",
-                    "surface": "in France",
-                    "upos": "PROPN",
+                    "id": "w4",
+                    "name": "in France",
+                    "lemma": "France",
+                    "pos_universal": "PROPN",
                     "features": {"Case": "Loc"},
                     "syntactic_link_target_id": "w2",
+                    "original_deprel": "nmod",
+                    "introduced_by": ["in"],
                 },
             ],
         }

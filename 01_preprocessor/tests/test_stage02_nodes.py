@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -14,7 +14,7 @@ def _load_stage02_pipeline():
     return module
 
 
-def test_stage02_expected_node_count_uses_units(tmp_path: Path, monkeypatch) -> None:
+def test_stage02_expected_node_count_uses_compact_nodes(tmp_path: Path, monkeypatch) -> None:
     stage02_pipeline = _load_stage02_pipeline()
     source_path = tmp_path / "eng_train.json"
     output_path = tmp_path / "eng_train.jsonl"
@@ -22,16 +22,17 @@ def test_stage02_expected_node_count_uses_units(tmp_path: Path, monkeypatch) -> 
         json.dumps(
             [
                 {
-                    "preprocessed_schema_version": 2,
                     "sentence_id": "eng_sample_1",
                     "text": "The city in France",
-                    "units": [
+                    "nodes": [
                         {
-                            "unit_id": "w2",
-                            "surface": "The city",
-                            "upos": "NOUN",
+                            "id": "w2",
+                            "name": "The city",
+                            "lemma": "city",
+                            "pos_universal": "NOUN",
                             "features": {},
                             "syntactic_link_target_id": None,
+                            "original_deprel": "root",
                         }
                     ],
                 }

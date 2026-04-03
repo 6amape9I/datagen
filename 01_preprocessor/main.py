@@ -1,14 +1,14 @@
-import logging
-from pathlib import Path
-from typing import Dict, List, Optional
+from __future__ import annotations
 
-from processor import process_syntagrus_file, get_and_reset_fallback_any_count
+from config import PREPROCESSED_DATA_DIR, RAW_CORPUS_DIR, ensure_stage01_runtime_dirs
+from processor import process_syntagrus_file
+from reader import discover_language_configs
 from utils.data_utils import save_data_to_json
-from config import RAW_CORPUS_DIR, PREPROCESSED_DATA_DIR
-from reader import detect_split_from_filename, discover_language_configs
 
 
 if __name__ == "__main__":
+    ensure_stage01_runtime_dirs()
+
     language_configs = discover_language_configs(RAW_CORPUS_DIR)
     if not language_configs:
         print(f"❌ В {RAW_CORPUS_DIR} не найдено ни одного .conllu-файла.")
@@ -42,18 +42,5 @@ if __name__ == "__main__":
 
             output_filepath = PREPROCESSED_DATA_DIR / f"{language_code}_{split_name}.json"
             save_data_to_json(all_split_data, output_filepath)
-
-            fallback_any_count = get_and_reset_fallback_any_count()
-            print(
-                "  - Legacy fallback-all candidates used: "
-                f"{fallback_any_count} раз(а) в наборе '{split_name}'."
-            )
-            try:
-                logging.warning(
-                    "LEGACY_CANDIDATE_FALLBACK_SUMMARY: "
-                    f"lang='{language_code}', split='{split_name}', count={fallback_any_count}"
-                )
-            except Exception:
-                pass
 
     print("\n--- ✅ Обработка всех наборов успешно завершена! ---")

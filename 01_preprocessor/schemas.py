@@ -4,9 +4,6 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Dict, List, Optional
 
 
-PREPROCESSED_SCHEMA_VERSION = 2
-
-
 @dataclass(slots=True)
 class RawToken:
     token_id: str
@@ -24,33 +21,22 @@ class RawToken:
 
 
 @dataclass(slots=True)
-class AttachmentRecord:
+class InternalAttachment:
     token_id: str
-    relation: str
-    attachment_type: str
     form: str
-    lemma: Optional[str]
-    upos: Optional[str]
-    xpos: Optional[str]
+    attachment_type: str
 
 
 @dataclass(slots=True)
-class SemanticUnit:
-    unit_id: str
-    head_token_id: str
-    span_token_ids: List[str]
-    surface: str
-    core_lemma: Optional[str]
-    upos: Optional[str]
-    xpos: Optional[str]
+class CompactNode:
+    id: str
+    name: str
+    lemma: Optional[str]
+    pos_universal: Optional[str]
     features: Dict[str, str] = field(default_factory=dict)
     syntactic_link_target_id: Optional[str] = None
     original_deprel: Optional[str] = None
-    attached_tokens: List[AttachmentRecord] = field(default_factory=list)
-    introduced_by: List[AttachmentRecord] = field(default_factory=list)
-    function_parts: List[AttachmentRecord] = field(default_factory=list)
-    ud_semantic_hints: List[str] = field(default_factory=list)
-    semantic_candidates_soft: List[str] = field(default_factory=list)
+    introduced_by: List[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -60,25 +46,17 @@ class SentenceRecord:
     language_code: str
     split: str
     source_file: str
-    tokens: List[RawToken] = field(default_factory=list)
-    units: List[SemanticUnit] = field(default_factory=list)
-    legacy_nodes: Optional[List[Dict[str, Any]]] = None
-    preprocessed_schema_version: int = PREPROCESSED_SCHEMA_VERSION
+    nodes: List[CompactNode] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        data = {
-            "preprocessed_schema_version": self.preprocessed_schema_version,
+        return {
             "sentence_id": self.sentence_id,
             "text": self.text,
             "language_code": self.language_code,
             "split": self.split,
             "source_file": self.source_file,
-            "tokens": serialize_dataclass_list(self.tokens),
-            "units": serialize_dataclass_list(self.units),
+            "nodes": [serialize_node(node) for node in self.nodes],
         }
-        if self.legacy_nodes is not None:
-            data["legacy_nodes"] = self.legacy_nodes
-        return data
 
 
 def serialize_dataclass_list(items: List[Any]) -> List[Any]:
@@ -94,3 +72,10 @@ def serialize_dataclass(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: serialize_dataclass(item) for key, item in value.items()}
     return value
+
+
+def serialize_node(node: CompactNode) -> Dict[str, Any]:
+    data = serialize_dataclass(node)
+    if not data.get("introduced_by"):
+        data.pop("introduced_by", None)
+    return data

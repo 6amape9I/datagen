@@ -7,7 +7,7 @@ from sentence_builder import process_conllu_file
 from validator import validate_response
 
 
-def test_stage03_adapter_prefers_units_and_validator_uses_units(tmp_path: Path) -> None:
+def test_stage03_adapter_uses_compact_nodes(tmp_path: Path) -> None:
     sample = """# sent_id = 1
 # text = The city in France
 1\tThe\tthe\tDET\tDT\tDefinite=Def|PronType=Art\t2\tdet\t_\t_
@@ -27,9 +27,9 @@ def test_stage03_adapter_prefers_units_and_validator_uses_units(tmp_path: Path) 
     )[0]
 
     llm_payload = _convert_nodes_for_llm(record)
-    assert llm_payload["nodes"][0]["surface"] == "The city"
-    assert "introduced_by" in llm_payload["nodes"][1]
-    assert "ud_semantic_hints" in llm_payload["nodes"][1]
+    assert llm_payload["nodes"][0]["name"] == "The city"
+    assert llm_payload["nodes"][1]["introduced_by"] == ["in"]
+    assert llm_payload["nodes"][1]["head_lemma"] == "city"
 
     response_nodes = [
         {"id": "w2", "syntactic_link_name": "ROOT"},

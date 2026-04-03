@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from reader import detect_split_from_filename, discover_language_configs
-from sentence_builder import EXPORT_MODE_CANONICAL_WITH_LEGACY
 from sentence_builder import process_conllu_file
 
 
@@ -29,7 +28,7 @@ def test_discover_language_configs(tmp_path: Path) -> None:
     assert [path.name for path in configs["rus"]["val"]] == ["demo-dev.conllu"]
 
 
-def test_process_conllu_file_emits_v2_sentence_metadata(tmp_path: Path) -> None:
+def test_process_conllu_file_emits_compact_sentence_metadata(tmp_path: Path) -> None:
     sample = """# sent_id = 1
 # text = The city in France
 1\tThe\tthe\tDET\tDT\tDefinite=Def|PronType=Art\t2\tdet\t_\t_
@@ -46,15 +45,13 @@ def test_process_conllu_file_emits_v2_sentence_metadata(tmp_path: Path) -> None:
         language_code="eng",
         split="train",
         source_file="eng_sample-train.conllu",
-        export_mode=EXPORT_MODE_CANONICAL_WITH_LEGACY,
     )
 
     record = records[0]
-    assert record["preprocessed_schema_version"] == 2
     assert record["language_code"] == "eng"
     assert record["split"] == "train"
     assert record["source_file"] == "eng_sample-train.conllu"
     assert record["sentence_id"] == "eng_sample-train.conllu_1"
-    assert record["tokens"][0]["token_id"] == "1"
-    assert record["units"][0]["unit_id"].startswith("w")
-    assert isinstance(record["legacy_nodes"], list)
+    assert [node["id"] for node in record["nodes"]] == ["w2", "w4"]
+    assert record["nodes"][0]["name"] == "The city"
+    assert record["nodes"][1]["introduced_by"] == ["in"]

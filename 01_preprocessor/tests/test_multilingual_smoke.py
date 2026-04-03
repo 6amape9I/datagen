@@ -56,7 +56,7 @@ SMOKE_CASES = {
 }
 
 
-def test_multilingual_smoke_examples_build_v2_records(tmp_path: Path) -> None:
+def test_multilingual_smoke_examples_build_compact_records(tmp_path: Path) -> None:
     for language_code, conllu_text in SMOKE_CASES.items():
         filepath = tmp_path / f"{language_code}-sample-train.conllu"
         filepath.write_text(conllu_text, encoding="utf-8")
@@ -68,8 +68,10 @@ def test_multilingual_smoke_examples_build_v2_records(tmp_path: Path) -> None:
             source_file=f"{language_code}_sample-train.conllu",
         )[0]
 
-        assert record["preprocessed_schema_version"] == 2
-        assert record["tokens"]
-        assert record["units"]
-        assert all("span_token_ids" in unit for unit in record["units"])
+        assert record["language_code"] == language_code
+        assert record["nodes"]
+        assert all("id" in node for node in record["nodes"])
+        assert all("name" in node for node in record["nodes"])
+        assert "tokens" not in record
+        assert "units" not in record
         assert "legacy_nodes" not in record

@@ -1,78 +1,57 @@
 # akin_core_datagen
 
-Пайплайн подготовки датасета для семантической разметки синтаксических связей на базе корпусов в формате CoNLL-U.
-
-Текущее целевое состояние:
-
-- `tokens` — raw authoritative UD layer
-- `units` — canonical normalized layer
-- Stage 03 и Stage 04 работают по `units`
-- `legacy_nodes` не нужен в normal path и включается только как compat export
+Пайплайн подготовки датасета для семантической разметки синтаксических связей на базе UD/CoNLL-U.
 
 ## Поток данных
 
-`01_preprocessor` -> `datasets/02_preprocessed` -> `03_gemini_fix_errors` -> `datasets/04_fixed` -> `04_postprocessor` -> `datasets/05_final`
+`01_preprocessor` -> `datasets/02_preprocessed` -> `02_local_generation` или `03_annotation` -> `datasets/04_fixed` -> `04_postprocessor` -> `datasets/05_final`
 
-`02_local_generation` остаётся вспомогательным локальным прогоном и сравнивает размер ответа с canonical `units`.
+Канонический контракт Stage 01 теперь один: компактный JSON с `sentence_id`, `text`, `language_code`, `split`, `source_file` и `nodes[]`.
+
+Схема: [`docs/preprocessed_schema_v2.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/docs/preprocessed_schema_v2.md)
 
 ## Stage 01
 
 Точка входа: [`01_preprocessor/main.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/01_preprocessor/main.py)
 
-Stage 01 теперь:
+Stage 01:
 
 - читает `.conllu` через `pyconll`
-- сохраняет сырой слой `tokens`
-- строит обратимые `units`
-- добавляет `ud_semantic_hints`
-- может добавлять `semantic_candidates_soft` как диагностический слой
-- умеет отдельно включать compat export `legacy_nodes`
+- нормализует UD-токены только как internal builder step
+- строит компактные semantic nodes
+- пишет только production `nodes[]`, без `tokens`, `units`, `legacy_nodes` и candidate lists
 
-Схема v2: [`docs/preprocessed_schema_v2.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/docs/preprocessed_schema_v2.md)
+## Stage 02
 
-### Export modes
+Точка входа: [`02_local_generation/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/02_local_generation/pipeline.py)
 
-Stage 01 управляется переменными окружения:
-
-- `PREPROCESSOR_EXPORT_MODE=canonical` — только `tokens` и `units` (режим по умолчанию)
-- `PREPROCESSOR_EXPORT_MODE=canonical+legacy` — дополнительно пишет `legacy_nodes`
-- `ENABLE_SOFT_CANDIDATES=true` — включает `semantic_candidates_soft`
-- `ENABLE_LEGACY_CANDIDATES=true` — добавляет candidates в `legacy_nodes`
-- `ENABLE_LEGACY_CANDIDATE_FALLBACK=true` — включает fallback-all только для compat/debug сценариев
+Stage 02 читает те же compact preprocessed records и проверяет размер ответа локальной модели по `nodes`.
 
 ## Stage 03
 
 Точки входа:
 
-- [`03_gemini_fix_errors/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/pipeline.py)
-- [`03_gemini_fix_errors/scheduler.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/scheduler.py)
+- [`03_annotation/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/pipeline.py)
+- [`03_annotation/scheduler.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/scheduler.py)
 
 Stage 03:
 
-- строит model input только из `units`
-- валидирует ответ только по canonical units и общей онтологии ролей
-- не использует `syntactic_link_candidates` как обязательный gatekeeper
-- разрешает `ROOT` только для unit с `syntactic_link_target_id = null`
+- строит model input напрямую из compact `nodes`
+- валидирует только structural integrity и ontology membership
+- разрешает `ROOT` только для узлов без `syntactic_link_target_id`
+- пишет ответы в `datasets/04_fixed/*.jsonl`
 
-Model layer очищен по ответственности:
+Model layer разделён по ответственности:
 
-- transport вынесен в [`03_gemini_fix_errors/providers/`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/providers)
-- request text собирается в [`prompt_builder.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/prompt_builder.py)
-- response roles берутся из общей онтологии через [`response_schema.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_gemini_fix_errors/response_schema.py)
-- имя модели берётся из `config.generate_conf.MODEL_NAME`, а не hardcoded в клиенте
+- transport: [`03_annotation/providers/`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/providers)
+- prompt assembly: [`03_annotation/prompt_builder.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/prompt_builder.py)
+- schema/ontology: [`03_annotation/response_schema.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/response_schema.py)
 
 ## Stage 04
 
 Точка входа: [`04_postprocessor/prepare_final_dataset.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/04_postprocessor/prepare_final_dataset.py)
 
-Stage 04 собирает финальный датасет из canonical `units`:
-
-- `id = unit_id`
-- `name = surface`
-- `pos_universal = upos`
-- `case = features.get("Case")`
-- `syntactic_link_target_id` из `units`
-- `syntactic_link_name` из model output
+Stage 04 объединяет compact Stage 01 nodes и Stage 03 labels по `id` и пишет финальные `input/output` записи.
 
 ## Конфигурация
 
@@ -83,6 +62,8 @@ Stage 04 собирает финальный датасет из canonical `unit
 - [`config/pipeline_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/pipeline_conf.py)
 - [`config/prompts.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/prompts.py)
 - [`config/semantic.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/semantic.py)
+
+`config/paths.py` больше не создаёт директории при импорте. Runtime-директории создаются только entrypoint’ами.
 
 ## Установка
 
@@ -97,40 +78,30 @@ pip install pyconll google-genai tqdm requests pytest
 ```bash
 python 01_preprocessor/main.py
 python 02_local_generation/pipeline.py
-python 03_gemini_fix_errors/pipeline.py
-python 03_gemini_fix_errors/scheduler.py
+python 03_annotation/pipeline.py
+python 03_annotation/scheduler.py
 python 04_postprocessor/prepare_final_dataset.py
 python utils/analyze_dataset.py
 python -m pytest 01_preprocessor/tests -q
 ```
 
-## Данные
+## Данные и логи
 
-Исходные корпуса ожидаются в:
+- raw corpora: `datasets/01_raw_corpus`
+- preprocessed compact records: `datasets/02_preprocessed`
+- local generation outputs: `datasets/03_local_generated`
+- validated annotations: `datasets/04_fixed`
+- final dataset: `datasets/05_final`
 
-```text
-datasets/01_raw_corpus/
-├── arm/
-├── eng/
-└── rus/
-```
+Логи:
 
-Split определяется по имени файла:
+- `logs/processor.log`
+- `logs/local_generation_errors.log`
+- `logs/validator_errors.log`
+- `logs/scheduler_summary.log`
 
-- `*train*.conllu` -> `train`
-- `*dev*.conllu` или `*val*.conllu` -> `val`
-- `*test*.conllu` -> `test`
+## Замечания
 
-## Логи
-
-- `logs/processor_fallback.log` — fallback summary для compat/export режима
-- `logs/local_generation_errors.log` — ошибки локальной генерации и node-count mismatch
-- `logs/validator_errors.log` — ontology/id validation errors
-- `logs/scheduler_summary.log` — сводка шедулера
-
-## Ограничения и заметки
-
-- каталог `03_gemini_fix_errors` пока сохраняет историческое имя, но его внутренний model layer уже разбит на нейтральные provider/prompt/schema компоненты
-- `legacy_nodes` остаётся только для explicit compat export, а не как обязательный слой
-- `semantic_candidates_soft` и fallback-all не участвуют в корректности downstream pipeline
+- split определяется по имени файла: `train`, `dev|val`, `test`
+- compact Stage 01 output intentionally не хранит raw-token trace и builder internals
 - для реальной эксплуатации API keys лучше держать в переменных окружения, а не в [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py)

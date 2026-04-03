@@ -1,4 +1,4 @@
-"""Ежедневный шедулер для этапа 03_gemini_fix_errors.
+"""Ежедневный шедулер для этапа 03_annotation.
 
 Использует большой пул ключей и поддерживает ограниченное число воркеров,
 которые последовательно перебирают ключи, пока очередь предложений не опустеет
@@ -30,6 +30,7 @@ from config import (
     SCHEDULER_CONSECUTIVE_ERROR_LIMIT,
     SCHEDULER_DAILY_QUOTA,
     SCHEDULER_LOG_PATH,
+    ensure_stage03_runtime_dirs,
 )
 from gemini_client import get_model_response
 from local_client import get_local_model_response
@@ -39,7 +40,7 @@ from validator import validate_response
 def _load_pipeline_helpers():
     """Динамически загружает pipeline.py, чтобы переиспользовать утилиты."""
     pipeline_path = Path(__file__).resolve().parent / "pipeline.py"
-    spec = importlib.util.spec_from_file_location("gemini_pipeline_for_scheduler", pipeline_path)
+    spec = importlib.util.spec_from_file_location("annotation_pipeline_for_scheduler", pipeline_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Не удалось загрузить модуль pipeline.py для шедулера.")
     module = importlib.util.module_from_spec(spec)
@@ -49,7 +50,6 @@ def _load_pipeline_helpers():
 
 _PIPELINE = _load_pipeline_helpers()
 load_processed_ids = _PIPELINE.load_processed_ids
-migrate_data_to_include_model_name = _PIPELINE.migrate_data_to_include_model_name
 get_file_lock = _PIPELINE.get_file_lock
 build_task_queue_from_local = _PIPELINE.build_task_queue_from_local
 
@@ -275,12 +275,12 @@ def run_scheduler_once() -> None:
         print("❌ В config.generate_conf.ALL_KEYS_FOR_SHEDULE не заданы ключи для шедулера.")
         return
 
+    ensure_stage03_runtime_dirs()
+
     print("=== Gemini Scheduler: подготовка ===")
     processed_ids = load_processed_ids(FIXED_DATA_DIR)
     if processed_ids:
         print(f"  Пропустим {len(processed_ids)} предложений — уже обработаны.")
-
-    migrate_data_to_include_model_name(FIXED_DATA_DIR)
 
     task_queue, total_tasks = _build_task_queue(processed_ids)
     if total_tasks == 0:

@@ -1,99 +1,78 @@
-# Stage 01 preprocessed schema v2
+# Stage 01 Compact Preprocessed Schema
 
-Stage 01 writes versioned records to `datasets/02_preprocessed/*.json`.
+Stage 01 writes compact records to `datasets/02_preprocessed/*.json`.
 
-## Authority rules
+## Sentence record
 
-- `tokens` is the authoritative raw UD layer.
-- `units` is the authoritative normalized layer.
-- `legacy_nodes` is optional compat export only.
+Each record contains:
 
-## Top-level sentence fields
-
-Every record contains:
-
-- `preprocessed_schema_version`
 - `sentence_id`
 - `text`
 - `language_code`
 - `split`
 - `source_file`
-- `tokens`
-- `units`
+- `nodes`
 
-Optional fields:
+There is no persisted raw token layer, no schema version switch, and no compatibility export in the normal path.
 
-- `legacy_nodes` when `PREPROCESSOR_EXPORT_MODE=canonical+legacy`
+## Node record
 
-## `tokens`
+Each node contains:
 
-`tokens` preserve near-lossless UD evidence.
-
-Each raw token stores:
-
-- `token_id`
-- `form`
+- `id`
+- `name`
 - `lemma`
-- `upos`
-- `xpos`
-- `feats`
-- `head_token_id`
-- `deprel`
-- `misc`
-- `deps`
-- `token_index`
-- `is_integer_id`
-
-Notes:
-
-- punctuation remains visible in `tokens`
-- multiword tokens and empty nodes remain visible in `tokens`
-- `feats` and `misc` preserve multi-valued UD attributes as lists
-
-## `units`
-
-`units` is the canonical downstream contract.
-
-Each unit stores:
-
-- `unit_id`
-- `head_token_id`
-- `span_token_ids`
-- `surface`
-- `core_lemma`
-- `upos`
-- `xpos`
+- `pos_universal`
 - `features`
 - `syntactic_link_target_id`
 - `original_deprel`
-- `attached_tokens`
+
+Optional:
+
 - `introduced_by`
-- `function_parts`
-- `ud_semantic_hints`
+
+`introduced_by` is a compact list of marker/adposition forms, for example `["in"]` or `["В"]`.
+
+## Example
+
+```json
+{
+  "sentence_id": "arm_train_000001",
+  "text": "В Армении число ИТ-специалистов составляло около десяти тысяч.",
+  "language_code": "arm",
+  "split": "train",
+  "source_file": "arm_train.conllu",
+  "nodes": [
+    {
+      "id": "w10",
+      "name": "В Армении",
+      "lemma": "Армения",
+      "pos_universal": "PROPN",
+      "features": {
+        "Case": "Loc"
+      },
+      "syntactic_link_target_id": "w5",
+      "original_deprel": "obl",
+      "introduced_by": ["В"]
+    }
+  ]
+}
+```
+
+## Downstream contract
+
+- `02_local_generation/pipeline.py` reads `text` and `nodes`, and checks node-count parity by `nodes`
+- `03_annotation/pipeline.py` builds model input from compact `nodes`
+- `03_annotation/validator.py` validates ID parity and ontology correctness against compact `nodes`
+- `04_postprocessor/prepare_final_dataset.py` joins Stage 01 nodes with Stage 03 labels by `id`
+
+## Non-goals
+
+The normal preprocessed artifact does not store:
+
+- raw UD `tokens`
+- normalized `units`
+- `legacy_nodes`
+- `syntactic_link_candidates`
 - `semantic_candidates_soft`
-
-Notes:
-
-- function words are attached reversibly, not deleted
-- `span_token_ids` lets you trace every unit back to raw tokens
-- `introduced_by` stores introducer-like markers/adpositions
-- `semantic_candidates_soft` is diagnostic and non-binding
-
-## `legacy_nodes`
-
-`legacy_nodes` is no longer required by the normal pipeline.
-
-It exists only for:
-
-- migration comparisons
-- old dataset compatibility
-- explicit debug export
-
-Normal Stage 03/04 behavior must not depend on it.
-
-## Downstream behavior
-
-- `03_gemini_fix_errors/pipeline.py` builds model input from `units`
-- `03_gemini_fix_errors/validator.py` validates against `units` and the shared ontology
-- `04_postprocessor/prepare_final_dataset.py` builds final output from `units`
-- `02_local_generation/pipeline.py` uses `units` for expected node count
+- builder internals such as `span_token_ids`, `attached_tokens`, or `function_parts`

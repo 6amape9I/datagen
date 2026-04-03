@@ -17,8 +17,7 @@ def get_model_response(
     return_error: bool = False,
 ) -> ReturnType:
     """
-    Отправляет данные одного предложения в Google GenAI через функцию generate()
-    из genai_example.py и возвращает ответ.
+    Отправляет данные одного предложения в Google GenAI и возвращает ответ.
 
     При `return_error=True` возвращает кортеж `(ответ | None, сообщение_об_ошибке | None)`,
     что позволяет вызывающему коду понять причину сбоя.
