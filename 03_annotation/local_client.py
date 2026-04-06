@@ -1,42 +1,41 @@
-# gemini_generate/local_client.py
-import json
-from typing import Any, Dict, Optional, Tuple, Union
+"""Compatibility wrapper around 03_generation local provider."""
 
-import requests
+from __future__ import annotations
 
-from prompt_builder import build_annotation_request_text
-from providers.local_http_client import request_local_http_response
+import importlib.util
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROMPT_BUILDER_PATH = PROJECT_ROOT / "03_generation" / "prompt_builder.py"
+PROVIDER_PATH = PROJECT_ROOT / "03_generation" / "providers" / "local_http.py"
+for path in (PROJECT_ROOT, PROMPT_BUILDER_PATH.parent, PROVIDER_PATH.parent.parent):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 
-ReturnType = Union[Dict[str, Any], None, Tuple[Optional[Dict[str, Any]], Optional[str]]]
+def _load_module(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load module from {path}.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def get_local_model_response(
-    client: requests.Session,
-    sentence_data: Dict[str, Any],
-    *,
-    return_error: bool = False,
-) -> ReturnType:
-    """
-    Отправляет данные одного предложения в локальный сервис генерации, используя
-    предоставленный HTTP-клиент, и возвращает ответ. Потокобезопасна.
+_PROMPTS = _load_module(PROMPT_BUILDER_PATH, "generation_prompt_builder_local_compat")
+_PROVIDER = _load_module(PROVIDER_PATH, "generation_local_provider_compat")
 
-    При `return_error=True` возвращает кортеж `(ответ | None, сообщение_об_ошибке | None)`,
-    что позволяет вызывающему коду понять причину сбоя.
-    """
-    if not client:
-        msg = "❌ Ошибка: в функцию не передан объект HTTP-клиента."
-        if return_error:
-            return None, msg
-        print(msg)
-        return None
 
-    try:
-        user_prompt_text = build_annotation_request_text(sentence_data)
-    except (TypeError, AttributeError) as e:
-        msg = f"❌ Ошибка при сборке промпта: {e}"
-        if return_error:
-            return None, msg
-        print(msg)
-        return None
-    return request_local_http_response(client, user_prompt_text, return_error=return_error)
+def get_local_model_response(client, sentence_data, *, return_error=False):
+    provider = _PROVIDER.LocalHTTPProvider()
+    prompt = _PROMPTS.build_prompt_package(sentence_data)
+    result = provider.generate(client, prompt)
+    if return_error:
+        return result.payload, result.error
+    return result.payload
+
+
+__all__ = ["get_local_model_response"]

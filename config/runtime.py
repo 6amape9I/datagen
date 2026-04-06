@@ -8,10 +8,14 @@ from typing import Any, Mapping
 from .defaults import (
     DEFAULT_ALL_KEYS_FOR_SHEDULE,
     DEFAULT_API_KEYS_STR,
+    DEFAULT_GENERATION_PROFILE,
     DEFAULT_LOCAL_API_URL,
     DEFAULT_LOCAL_INFER_URL,
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MODEL_NAME,
     DEFAULT_REQUEST_STRATEGY,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_THINKING_BUDGET,
 )
 
 
@@ -22,6 +26,11 @@ PRIVATE_OVERRIDE_FIELDS = (
     "LOCAL_INFER_URL",
     "API_KEYS_STR",
     "ALL_KEYS_FOR_SHEDULE",
+    "REQUEST_STRATEGY",
+    "THINKING_BUDGET",
+    "MAX_OUTPUT_TOKENS",
+    "TEMPERATURE",
+    "GENERATION_PROFILE",
 )
 ENV_TO_FIELD = {
     "GEMINI_MODEL_NAME": "MODEL_NAME",
@@ -30,6 +39,10 @@ ENV_TO_FIELD = {
     "GEMINI_API_KEYS": "API_KEYS_STR",
     "GEMINI_SCHEDULER_KEYS": "ALL_KEYS_FOR_SHEDULE",
     "GEMINI_REQUEST_STRATEGY": "REQUEST_STRATEGY",
+    "GEMINI_THINKING_BUDGET": "THINKING_BUDGET",
+    "GENERATION_MAX_OUTPUT_TOKENS": "MAX_OUTPUT_TOKENS",
+    "GENERATION_TEMPERATURE": "TEMPERATURE",
+    "GENERATION_PROFILE": "GENERATION_PROFILE",
 }
 
 
@@ -41,6 +54,10 @@ class RuntimeConfig:
     api_keys_str: str
     all_keys_for_schedule: str
     request_strategy: str
+    thinking_budget: int
+    max_output_tokens: int
+    temperature: float
+    generation_profile: str
 
     @property
     def api_keys(self) -> list[str]:
@@ -74,6 +91,18 @@ def load_runtime_config(
     env = environ or os.environ
     private = dict(private_overrides) if private_overrides is not None else load_private_overrides()
 
+    def _coerce_int(value: Any, default: int) -> int:
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return default
+
+    def _coerce_float(value: Any, default: float) -> float:
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return default
+
     config_values: dict[str, str] = {
         "MODEL_NAME": str(private.get("MODEL_NAME", DEFAULT_MODEL_NAME)),
         "LOCAL_API_URL": str(private.get("LOCAL_API_URL", DEFAULT_LOCAL_API_URL)),
@@ -81,6 +110,10 @@ def load_runtime_config(
         "API_KEYS_STR": str(private.get("API_KEYS_STR", DEFAULT_API_KEYS_STR)),
         "ALL_KEYS_FOR_SHEDULE": str(private.get("ALL_KEYS_FOR_SHEDULE", DEFAULT_ALL_KEYS_FOR_SHEDULE)),
         "REQUEST_STRATEGY": str(private.get("REQUEST_STRATEGY", DEFAULT_REQUEST_STRATEGY)),
+        "THINKING_BUDGET": str(private.get("THINKING_BUDGET", DEFAULT_THINKING_BUDGET)),
+        "MAX_OUTPUT_TOKENS": str(private.get("MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)),
+        "TEMPERATURE": str(private.get("TEMPERATURE", DEFAULT_TEMPERATURE)),
+        "GENERATION_PROFILE": str(private.get("GENERATION_PROFILE", DEFAULT_GENERATION_PROFILE)),
     }
 
     for env_name, field_name in ENV_TO_FIELD.items():
@@ -97,6 +130,10 @@ def load_runtime_config(
         api_keys_str=config_values["API_KEYS_STR"].strip(),
         all_keys_for_schedule=config_values["ALL_KEYS_FOR_SHEDULE"].strip(),
         request_strategy=request_strategy,
+        thinking_budget=_coerce_int(config_values["THINKING_BUDGET"], DEFAULT_THINKING_BUDGET),
+        max_output_tokens=_coerce_int(config_values["MAX_OUTPUT_TOKENS"], DEFAULT_MAX_OUTPUT_TOKENS),
+        temperature=_coerce_float(config_values["TEMPERATURE"], DEFAULT_TEMPERATURE),
+        generation_profile=config_values["GENERATION_PROFILE"].strip() or DEFAULT_GENERATION_PROFILE,
     )
 
 
@@ -110,4 +147,7 @@ ALL_KEYS_FOR_SHEDULE = RUNTIME_CONFIG.all_keys_for_schedule
 REQUEST_STRATEGY = RUNTIME_CONFIG.request_strategy
 API_KEYS = RUNTIME_CONFIG.api_keys
 ALL_SCHEDULER_KEYS = RUNTIME_CONFIG.scheduler_keys
-
+THINKING_BUDGET = RUNTIME_CONFIG.thinking_budget
+MAX_OUTPUT_TOKENS = RUNTIME_CONFIG.max_output_tokens
+TEMPERATURE = RUNTIME_CONFIG.temperature
+GENERATION_PROFILE = RUNTIME_CONFIG.generation_profile

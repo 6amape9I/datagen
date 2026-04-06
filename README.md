@@ -4,7 +4,7 @@
 
 ## Поток данных
 
-`01_preprocessor` -> `datasets/02_preprocessed` -> `02_local_generation` или `03_annotation` -> `datasets/04_fixed` -> `04_postprocessor` -> `datasets/05_final`
+`01_preprocessor` -> `datasets/02_preprocessed` -> `03_generation` -> `datasets/04_fixed` -> `04_postprocessor` -> `datasets/05_final`
 
 Канонический контракт Stage 01 теперь один: компактный JSON с `sentence_id`, `text`, `language_code`, `split`, `source_file` и `nodes[]`.
 
@@ -24,21 +24,17 @@ Stage 01:
 
 First-pass empirical report: [`docs/stage01_first_pass_audit.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/docs/stage01_first_pass_audit.md)
 
-## Stage 02
-
-Точка входа: [`02_local_generation/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/02_local_generation/pipeline.py)
-
-Stage 02 читает те же compact preprocessed records и проверяет размер ответа локальной модели по `nodes`.
-
 ## Stage 03
 
 Точки входа:
 
-- [`03_annotation/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/pipeline.py)
-- [`03_annotation/scheduler.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/scheduler.py)
+- [`03_generation/local_gen.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/local_gen.py)
+- [`03_generation/google_gen.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/google_gen.py)
+- [`03_generation/scheduler.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/scheduler.py)
 
 Stage 03:
 
+- использует один общий generation pipeline для local и Google providers
 - строит model input напрямую из compact `nodes`
 - валидирует только structural integrity и ontology membership
 - разрешает `ROOT` только для узлов без `syntactic_link_target_id`
@@ -46,9 +42,11 @@ Stage 03:
 
 Model layer разделён по ответственности:
 
-- transport: [`03_annotation/providers/`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/providers)
-- prompt assembly: [`03_annotation/prompt_builder.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/prompt_builder.py)
-- schema/ontology: [`03_annotation/response_schema.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_annotation/response_schema.py)
+- orchestration: [`03_generation/pipeline.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/pipeline.py)
+- input builder: [`03_generation/input_builder.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/input_builder.py)
+- prompt assembly: [`03_generation/prompt_builder.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/prompt_builder.py)
+- schema/ontology: [`03_generation/response_schema.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/response_schema.py)
+- transport: [`03_generation/providers/`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/providers)
 
 ## Stage 04
 
@@ -82,6 +80,10 @@ Runtime-config приоритет:
 - `GEMINI_API_KEYS`
 - `GEMINI_SCHEDULER_KEYS`
 - `GEMINI_REQUEST_STRATEGY`
+- `GEMINI_THINKING_BUDGET`
+- `GENERATION_MAX_OUTPUT_TOKENS`
+- `GENERATION_TEMPERATURE`
+- `GENERATION_PROFILE`
 - `LOCAL_API_URL`
 - `LOCAL_INFER_URL`
 
@@ -98,9 +100,9 @@ pip install pyconll google-genai tqdm requests pytest
 ```bash
 python 01_preprocessor/main.py
 python 01_preprocessor/audit_preprocessed.py --mode rebuild --sentence-limit 200
-python 02_local_generation/pipeline.py
-python 03_annotation/pipeline.py
-python 03_annotation/scheduler.py
+python 03_generation/local_gen.py
+python 03_generation/google_gen.py
+python 03_generation/scheduler.py
 python 04_postprocessor/prepare_final_dataset.py
 python utils/analyze_dataset.py
 python -m pytest 01_preprocessor/tests -q
@@ -110,8 +112,7 @@ python -m pytest 01_preprocessor/tests -q
 
 - raw corpora: `datasets/01_raw_corpus`
 - preprocessed compact records: `datasets/02_preprocessed`
-- local generation outputs: `datasets/03_local_generated`
-- validated annotations: `datasets/04_fixed`
+- generation outputs: `datasets/04_fixed`
 - final dataset: `datasets/05_final`
 
 Логи:

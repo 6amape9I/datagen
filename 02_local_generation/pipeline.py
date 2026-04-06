@@ -1,219 +1,32 @@
-"""Stage 02 — Local generation pipeline.
-
-Reads compact preprocessed records from `datasets/02_preprocessed` and produces
-matching `*.jsonl` files in `datasets/03_local_generated` by querying a local
-inference server.
-"""
+"""Compatibility wrapper for the canonical 03_generation local entrypoint."""
 
 from __future__ import annotations
 
-import json
-import logging
+import importlib.util
 import sys
-import time
-import urllib.error
-import urllib.request
-from http.client import RemoteDisconnected
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from config import (
-    LOCAL_GENERATED_DATA_DIR,
-    LOCAL_GENERATION_LOG_PATH,
-    LOCAL_INFER_URL,
-    PREPROCESSED_DATA_DIR,
-    ensure_stage02_runtime_dirs,
-)
-
-_proxy_handler = urllib.request.ProxyHandler({})
-_opener = urllib.request.build_opener(_proxy_handler)
-urllib.request.install_opener(_opener)
+TARGET_PATH = PROJECT_ROOT / "03_generation" / "local_gen.py"
+for path in (PROJECT_ROOT, TARGET_PATH.parent):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 
-_LOGGER: logging.Logger | None = None
-
-
-def _get_logger() -> logging.Logger:
-    global _LOGGER
-    if _LOGGER is not None:
-        return _LOGGER
-
-    LOCAL_GENERATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("local_generation")
-    if not logger.handlers:
-        handler = logging.FileHandler(LOCAL_GENERATION_LOG_PATH, mode="a", encoding="utf-8")
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        handler.setFormatter(formatter)
-        logger.setLevel(logging.WARNING)
-        logger.addHandler(handler)
-        logger.propagate = False
-    _LOGGER = logger
-    return logger
-
-
-def load_processed_ids(output_path: Path) -> Set[str]:
-    processed_ids: Set[str] = set()
-    if not output_path.exists():
-        return processed_ids
-
-    with open(output_path, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            sentence_id = record.get("sentence_id")
-            if sentence_id:
-                processed_ids.add(sentence_id)
-    return processed_ids
-
-
-def iter_preprocessed_sentences(filepath: Path) -> Iterable[Dict[str, Any]]:
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    for item in data:
-        if isinstance(item, dict):
-            yield item
-
-
-def _extract_nodes(response_json: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    nodes = response_json.get("nodes")
-    if isinstance(nodes, list):
-        return nodes
-
-    payload = response_json.get("json")
-    if isinstance(payload, dict) and isinstance(payload.get("nodes"), list):
-        return payload.get("nodes")
-    if isinstance(payload, list):
-        return payload
-    return None
-
-
-def request_inference(
-    sentence_data: Dict[str, Any], *, retries: int = 3, backoff_sec: float = 1.0
-) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
-    text = sentence_data.get("text", "")
-    payload = json.dumps({"text": text}, ensure_ascii=False).encode("utf-8")
-    last_error: Exception | None = None
-
-    for attempt in range(1, retries + 1):
-        req = urllib.request.Request(
-            LOCAL_INFER_URL,
-            data=payload,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                body = resp.read().decode("utf-8")
-            response_json = json.loads(body)
-            nodes = _extract_nodes(response_json)
-            if nodes is None:
-                return None, "nodes_missing_in_response"
-            return nodes, None
-        except RemoteDisconnected as exc:
-            last_error = exc
-        except urllib.error.HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace")
-            last_error = RuntimeError(f"http_{exc.code}: {exc.reason}; body={error_body}")
-        except urllib.error.URLError as exc:
-            last_error = exc
-        except json.JSONDecodeError as exc:
-            last_error = RuntimeError(f"response_json_decode_failed: {exc}")
-
-        if attempt < retries:
-            time.sleep(backoff_sec * attempt)
-
-    assert last_error is not None
-    return None, str(last_error)
-
-
-def _log_node_mismatch(sentence_id: str, expected: int, actual: int) -> None:
-    _get_logger().warning(
-        "NODE_COUNT_MISMATCH: sentence_id=%s expected=%s actual=%s",
-        sentence_id,
-        expected,
-        actual,
-    )
-
-
-def _log_request_error(sentence_id: str, error_text: str) -> None:
-    _get_logger().warning("REQUEST_ERROR: sentence_id=%s error=%s", sentence_id, error_text)
-
-
-def process_file(preprocessed_path: Path, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    processed_ids = load_processed_ids(output_path)
-
-    print(f"\n--- Local generation: {preprocessed_path.name} -> {output_path.name} ---")
-    if processed_ids:
-        print(f"Пропускаю уже обработанные записи: {len(processed_ids)}")
-
-    total = 0
-    written = 0
-    errors = 0
-
-    with open(output_path, "a", encoding="utf-8") as f_out:
-        for sentence_data in iter_preprocessed_sentences(preprocessed_path):
-            total += 1
-            sentence_id = sentence_data.get("sentence_id")
-            if not sentence_id or sentence_id in processed_ids:
-                continue
-
-            text = sentence_data.get("text", "")
-            expected_nodes_len = len(sentence_data.get("nodes", []))
-
-            nodes, error_text = request_inference(sentence_data)
-
-            node_error = False
-            if error_text is not None:
-                node_error = True
-                errors += 1
-                _log_request_error(sentence_id, error_text)
-                nodes = nodes or []
-
-            actual_nodes_len = len(nodes)
-            if actual_nodes_len != expected_nodes_len:
-                node_error = True
-                errors += 1
-                _log_node_mismatch(sentence_id, expected_nodes_len, actual_nodes_len)
-
-            record = {
-                "sentence_id": sentence_id,
-                "text": text,
-                "nodes": nodes,
-                "node_error": node_error,
-            }
-            f_out.write(json.dumps(record, ensure_ascii=False) + "\n")
-            written += 1
-
-    print(f"Всего предложений: {total}")
-    print(f"Новых записей добавлено: {written}")
-    if errors:
-        print(f"Предупреждений/ошибок: {errors} (см. {LOCAL_GENERATION_LOG_PATH})")
+def _load_local_entrypoint():
+    spec = importlib.util.spec_from_file_location("generation_local_gen_wrapper", TARGET_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load canonical local generation entrypoint from {TARGET_PATH}.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_pipeline() -> None:
-    ensure_stage02_runtime_dirs()
-
-    files_to_process = sorted(PREPROCESSED_DATA_DIR.glob("*.json"))
-    if not files_to_process:
-        print(f"❌ В {PREPROCESSED_DATA_DIR} не найдено *.json файлов.")
-        return
-
-    print("=== Stage 02: Local generation ===")
-    print(f"Сервер инференса: {LOCAL_INFER_URL}")
-
-    for preprocessed_path in files_to_process:
-        output_filename = preprocessed_path.name.replace(".json", ".jsonl")
-        output_path = LOCAL_GENERATED_DATA_DIR / output_filename
-        process_file(preprocessed_path, output_path)
-
-    print("\n✅ Local generation завершена.")
+    print("⚠️  02_local_generation/pipeline.py is deprecated. Redirecting to 03_generation/local_gen.py.")
+    _load_local_entrypoint().main()
 
 
 if __name__ == "__main__":

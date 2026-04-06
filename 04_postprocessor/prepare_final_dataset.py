@@ -25,7 +25,7 @@ def prepare_final_dataset() -> None:
 
     if not source_data_dir.exists() or not annotation_data_dir.exists():
         print(f"❌ Ошибка: Не найдены необходимые директории: '{source_data_dir}' или '{annotation_data_dir}'.")
-        print("Пожалуйста, сначала запустите 01_preprocessor/main.py и 03_annotation/pipeline.py.")
+        print("Пожалуйста, сначала запустите 01_preprocessor/main.py и один из entrypoint'ов 03_generation.")
         return
 
     print(f"Финальный датасет будет сохранен в: '{ready_data_dir}'")

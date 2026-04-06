@@ -1,55 +1,89 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
-
-def _load_stage02_pipeline():
-    module_path = Path(__file__).resolve().parents[2] / "02_local_generation" / "pipeline.py"
-    spec = importlib.util.spec_from_file_location("stage02_pipeline_test_module", module_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from pipeline import run_generation_pipeline
+from providers.base import GenerationResult, ProviderMetadata
 
 
-def test_stage02_expected_node_count_uses_compact_nodes(tmp_path: Path, monkeypatch) -> None:
-    stage02_pipeline = _load_stage02_pipeline()
-    source_path = tmp_path / "eng_train.json"
-    output_path = tmp_path / "eng_train.jsonl"
-    source_path.write_text(
-        json.dumps(
-            [
+class DummyProvider:
+    metadata = ProviderMetadata(provider="dummy", model_name="dummy-model", generation_profile="test")
+
+    def worker_tokens(self, requested_workers: int) -> list[str]:
+        return ["dummy-token"]
+
+    def create_client(self, worker_token: str):
+        return object()
+
+    def generate(self, client, prompt):
+        return GenerationResult(
+            payload={
+                "nodes": [
+                    {"id": "w2", "syntactic_link_name": "ROOT"},
+                    {"id": "w4", "syntactic_link_name": "Content_Theme"},
+                ]
+            },
+            error=None,
+        )
+
+    def is_quota_error(self, error_text: str | None) -> bool:
+        return False
+
+
+def test_generation_pipeline_writes_minimal_jsonl_output(tmp_path: Path) -> None:
+    source_dir = tmp_path / "preprocessed"
+    output_dir = tmp_path / "fixed"
+    source_dir.mkdir()
+    output_dir.mkdir()
+
+    source_record = [
+        {
+            "sentence_id": "eng_sample_1",
+            "text": "The city in France",
+            "language_code": "eng",
+            "split": "train",
+            "source_file": "eng_sample.conllu",
+            "nodes": [
                 {
-                    "sentence_id": "eng_sample_1",
-                    "text": "The city in France",
-                    "nodes": [
-                        {
-                            "id": "w2",
-                            "name": "The city",
-                            "lemma": "city",
-                            "pos_universal": "NOUN",
-                            "features": {},
-                            "syntactic_link_target_id": None,
-                            "original_deprel": "root",
-                        }
-                    ],
-                }
+                    "id": "w2",
+                    "name": "The city",
+                    "lemma": "city",
+                    "pos_universal": "NOUN",
+                    "features": {},
+                    "syntactic_link_target_id": None,
+                    "original_deprel": "root",
+                },
+                {
+                    "id": "w4",
+                    "name": "in France",
+                    "lemma": "France",
+                    "pos_universal": "PROPN",
+                    "features": {"Case": "Loc"},
+                    "syntactic_link_target_id": "w2",
+                    "original_deprel": "nmod",
+                    "introduced_by": ["in"],
+                },
             ],
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+        }
+    ]
+    (source_dir / "eng_train.json").write_text(json.dumps(source_record, ensure_ascii=False), encoding="utf-8")
+
+    run_generation_pipeline(
+        DummyProvider(),
+        input_dir=source_dir,
+        output_dir=output_dir,
+        num_workers=1,
+        max_retries=1,
+        initial_backoff_delay=0,
     )
 
-    monkeypatch.setattr(
-        stage02_pipeline,
-        "request_inference",
-        lambda sentence_data, retries=3, backoff_sec=1.0: ([{"id": "w2"}], None),
-    )
-
-    stage02_pipeline.process_file(source_path, output_path)
-
-    record = json.loads(output_path.read_text(encoding="utf-8").strip())
-    assert record["node_error"] is False
-    assert record["nodes"] == [{"id": "w2"}]
+    written = json.loads((output_dir / "eng_train.jsonl").read_text(encoding="utf-8").strip())
+    assert written["sentence_id"] == "eng_sample_1"
+    assert written["provider"] == "dummy"
+    assert written["model_name"] == "dummy-model"
+    assert written["generation_profile"] == "test"
+    assert written["nodes"] == [
+        {"id": "w2", "syntactic_link_name": "ROOT"},
+        {"id": "w4", "syntactic_link_name": "Content_Theme"},
+    ]

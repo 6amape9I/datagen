@@ -1,18 +1,19 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- Stages: `01_preprocessor/`, `02_local_generation/`, `03_annotation/`, `04_postprocessor/`.
+- Stages: `01_preprocessor/`, `03_generation/`, `04_postprocessor/`.
+- Compatibility wrappers: `02_local_generation/`, `03_annotation/`.
 - Shared config: `config/` with pure path definitions in `config/paths.py`.
 - Utilities: `utils/`.
-- Data & logs: `datasets/01_raw_corpus`, `datasets/02_preprocessed`, `datasets/03_local_generated`, `datasets/04_fixed`, `datasets/05_final`, and `logs/`.
+- Data & logs: `datasets/01_raw_corpus`, `datasets/02_preprocessed`, `datasets/04_fixed`, `datasets/05_final`, and `logs/`.
 
 ## Build, Test, and Dev Commands
 - Environment: Python 3.12+. Install deps: `pip install pyconll google-genai tqdm requests pytest`.
 - Preprocess corpus: `python 01_preprocessor/main.py` -> writes compact JSON to `datasets/02_preprocessed`.
-- Local generation: `python 02_local_generation/pipeline.py` -> writes JSONL to `datasets/03_local_generated`.
-- Annotation/fix stage: `python 03_annotation/pipeline.py` -> writes JSONL to `datasets/04_fixed`.
+- Local generation: `python 03_generation/local_gen.py` -> writes JSONL to `datasets/04_fixed`.
+- Google generation: `python 03_generation/google_gen.py` -> writes JSONL to `datasets/04_fixed`.
   - Configure API keys via `GEMINI_API_KEYS="key1,key2"` when using Google GenAI.
-- Scheduler: `python 03_annotation/scheduler.py`.
+- Scheduler: `python 03_generation/scheduler.py`.
 - Final dataset: `python 04_postprocessor/prepare_final_dataset.py` -> writes to `datasets/05_final`.
 - Optional analysis: `python utils/analyze_dataset.py`.
 

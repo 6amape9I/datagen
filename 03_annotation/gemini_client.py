@@ -1,72 +1,41 @@
-# gemini_generate/gemini_client.py
-import json
-from typing import Any, Dict, Optional, Tuple, Union
+"""Compatibility wrapper around 03_generation Google provider."""
 
-from config import MODEL_NAME
-from prompt_builder import build_annotation_request_text
-from providers.google_genai_client import request_google_genai_response
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROMPT_BUILDER_PATH = PROJECT_ROOT / "03_generation" / "prompt_builder.py"
+PROVIDER_PATH = PROJECT_ROOT / "03_generation" / "providers" / "google_genai.py"
+for path in (PROJECT_ROOT, PROMPT_BUILDER_PATH.parent, PROVIDER_PATH.parent.parent):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 
-ReturnType = Union[Dict[str, Any], None, Tuple[Optional[Dict[str, Any]], Optional[str]]]
+def _load_module(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load module from {path}.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def get_model_response(
-    api_key: str,
-    sentence_data: Dict[str, Any],
-    *,
-    return_error: bool = False,
-) -> ReturnType:
-    """
-    Отправляет данные одного предложения в Google GenAI и возвращает ответ.
+_PROMPTS = _load_module(PROMPT_BUILDER_PATH, "generation_prompt_builder_compat")
+_PROVIDER = _load_module(PROVIDER_PATH, "generation_google_provider_compat")
 
-    При `return_error=True` возвращает кортеж `(ответ | None, сообщение_об_ошибке | None)`,
-    что позволяет вызывающему коду понять причину сбоя.
-    """
-    if not api_key:
-        msg = "❌ Ошибка: не передан API ключ для GenAI."
-        if return_error:
-            return None, msg
-        print(msg)
-        return None
 
-    try:
-        sentence_json_string = build_annotation_request_text(sentence_data)
-    except (TypeError, AttributeError) as e:
-        msg = f"❌ Ошибка при сборке промпта: {e}"
-        if return_error:
-            return None, msg
-        print(msg)
-        return None
+def get_model_response(api_key, sentence_data, *, return_error=False):
+    provider = _PROVIDER.GoogleGenAIProvider()
+    prompt = _PROMPTS.build_prompt_package(sentence_data)
+    result = provider.generate(api_key, prompt)
+    if return_error:
+        return result.payload, result.error
+    return result.payload
 
-    try:
-        full_response_text = request_google_genai_response(
-            sentence_json_string,
-            api_key=api_key,
-            model_name=MODEL_NAME,
-            return_text=True,
-        )
 
-        if not full_response_text:
-            msg = "  - 🟡 Ответ от GenAI пустой."
-            if return_error:
-                return None, msg
-            print(msg)
-            return None
-
-        parsed = json.loads(full_response_text)
-        if return_error:
-            return parsed, None
-        return parsed
-
-    except json.JSONDecodeError:
-        msg = f"❌ Ошибка декодирования JSON. Ответ от GenAI:\n{full_response_text}"
-        if return_error:
-            return None, msg
-        print(msg)
-        return None
-    except Exception as e:
-        msg = f"❌ Непредвиденная ошибка во время запроса к GenAI: {e}"
-        if return_error:
-            return None, msg
-        print(msg)
-        return None
+__all__ = ["get_model_response"]

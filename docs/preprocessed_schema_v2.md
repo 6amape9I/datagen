@@ -61,9 +61,9 @@ Optional:
 
 ## Downstream contract
 
-- `02_local_generation/pipeline.py` reads `text` and `nodes`, and checks node-count parity by `nodes`
-- `03_annotation/pipeline.py` builds model input from compact `nodes`
-- `03_annotation/validator.py` validates ID parity and ontology correctness against compact `nodes`
+- `03_generation/input_builder.py` builds model input from compact `nodes`
+- `03_generation/validator.py` validates ID parity and ontology correctness against compact `nodes`
+- `03_generation` writes minimal `id + syntactic_link_name` annotations to `datasets/04_fixed/*.jsonl`
 - `04_postprocessor/prepare_final_dataset.py` joins Stage 01 nodes with Stage 03 labels by `id`
 
 ## Non-goals
