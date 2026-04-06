@@ -1,98 +1,59 @@
-# Расширенный пакет prompts для generation layer
+# To run this code you need to install the following dependencies:
+# pip install google-genai
 
-Этот файл заменяет слишком короткую версию `generation_prompts.md`.
+import os
+from google import genai
+from google.genai import types
 
-Его цель — дать модели **достаточно богатый node-level контекст** для точной разметки, но при этом не раздувать каждый запрос бессмысленно. Здесь нет описаний межпредложенческих / sentence-level relations из второго документа: этот пакет относится только к **semantic node labeling внутри одного предложения**.
 
----
+def generate():
+    client = genai.Client(
+        api_key=os.environ.get("AIzaSyAreRo9_A856Dm-XWXnOn_ljvZiAOny5Sw,"),
+    )
 
-## 1. Строгий контракт входа
-
-В generation layer на вход модели подаётся **только один sentence-level record**:
-
-```json
-{
-  "text": "В Армении число ИТ-специалистов составляло около десяти тысяч.",
-  "nodes": [
-    {
-      "id": "w10",
-      "name": "В Армении",
-      "lemma": "Армения",
-      "pos_universal": "PROPN",
-      "features": {
-        "Case": "Loc"
-      },
-      "syntactic_link_target_id": "w5",
-      "original_deprel": "obl",
-      "introduced_by": ["В"],
-      "head_lemma": "число"
-    }
-  ]
-}
-```
-
-### Поля входа
-
-#### Обязательные верхнего уровня
-- `text`
-- `nodes`
-
-#### Обязательные поля узла
-- `id`
-- `name`
-- `lemma`
-- `pos_universal`
-- `features`
-- `syntactic_link_target_id`
-- `original_deprel`
-
-#### Опциональные поля узла
-- `introduced_by`
-- `head_lemma`
-
-### Что не подаётся
-- raw tokens
-- builder internals
-- candidate lists
-- legacy fields
-- sentence type / inter-sentence relations
-- любые debug traces
-
----
-
-## 2. Строгий контракт выхода
-
-На выходе нужна только компактная структура:
-
-```json
-{
-  "nodes": [
-    {
-      "id": "w10",
-      "syntactic_link_name": "Inclusion_Containment"
-    }
-  ]
-}
-```
-
-### Правила выхода
-- Для каждого входного узла должен быть **ровно один** объект в выходе.
-- Каждый объект выхода содержит только:
-  - `id`
-  - `syntactic_link_name`
-- Никаких объяснений, комментариев, prose-текста или дополнительных полей.
-- Если `syntactic_link_target_id == null`, связь **всегда** `ROOT`.
-
----
-
-## 3. Полный расширенный system prompt
-
-Ниже — главная версия prompt для Google generation и для сильной локальной модели.
-
-### `FULL_NODE_LEVEL_SYSTEM_PROMPT`
-
-```text
-РОЛЬ
+    model = "gemma-4-31b-it"
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text="""Шла Саша по шоссе и сосала Сушку."""),
+            ],
+        ),
+    ]
+    tools = [
+        types.Tool(),
+    ]
+    generate_content_config = types.GenerateContentConfig(
+        max_output_tokens=32760,
+        thinking_config=types.ThinkingConfig(
+            thinking_level="HIGH",
+        ),
+        tools=tools,
+        response_mime_type="application/json",
+        response_schema=genai.types.Schema(
+            type = genai.types.Type.OBJECT,
+            required = ["nodes"],
+            properties = {
+                "nodes": genai.types.Schema(
+                    type = genai.types.Type.ARRAY,
+                    items = genai.types.Schema(
+                        type = genai.types.Type.OBJECT,
+                        required = ["id", "syntactic_link_name"],
+                        properties = {
+                            "id": genai.types.Schema(
+                                type = genai.types.Type.STRING,
+                            ),
+                            "syntactic_link_name": genai.types.Schema(
+                                type = genai.types.Type.STRING,
+                                enum = ["Agent", "Patient", "Recipient", "Instrument", "Inclusion_Containment", "Exteriority", "Support", "Subjacency", "Covering_Superadjacency", "Proximity", "Contact_Adjacency", "Attachment", "Front_Region", "Posterior_Region_Behind", "Intermediacy", "Opposition_Across_from", "Alignment_Alongness", "Circumference_Encirclement", "Crossing_Transverse", "Lateral_Beside", "Functional_Proximity", "Source_as_Origin", "Egress_Exiting_an_Interior", "Separation_from_a_Surface", "Departure_from_a_Landmark", "Emergence_from_below", "Descent_from_a_high_point", "Ascent_to_a_high_point", "Detachment", "Egress_from_an_intermediate_position", "Emergence_from_behind_an_obstacle", "Goal_as_Recipient", "Distribution_over_an_area", "Ingress_Entering_an_Interior", "Attaining_a_Surface", "Approaching_a_Landmark", "Attachment_Connection", "Reaching_a_lower_position", "Reaching_the_other_side_Crossing", "Movement_to_a_posterior_region", "Entering_an_intermediate_position", "Penetration", "Transverse", "Alignment", "Bypass", "Circumvention", "Vertical_path", "Superlative_Sublative", "Interlative", "Reaching_an_abstract_goal_state", "Metaphorical_Path", "Finality", "Acquisition", "Numeric", "Quantitative_Large", "Quantitative_Small", "Collective_Relation", "Approximative_Relation", "Proportional_Fractional_Relation", "Metric_Measuring_Relation", "Duration", "Point_in_Time", "Frequency", "Terminus_ad_quem_Deadline", "Prospective_Starting_point", "Quality", "Possession", "Content_Theme", "Addition_Conjunction", "Disjunction", "Contrast", "Juxtaposition", "Concession", "Alternative", "Clarification", "Sequence_in_time_before", "Sequence_in_time_after", "Sequence_in_time_while", "Reason_because", "Result_since", "Result_because", "Goal", "Condition", "Comparison", "Specification_which", "Specification_that_is", "Exception", "Addition", "ROOT"],
+                            ),
+                        },
+                    ),
+                ),
+            },
+        ),
+        system_instruction=[
+            types.Part.from_text(text="""РОЛЬ
 
 Ты — эксперт по семантической разметке узлов внутри одного предложения.
 Твоя задача — для каждого узла определить наиболее подходящую семантическую связь между этим узлом A и его головным узлом B.
@@ -135,7 +96,7 @@
 2. Каждый входной узел должен появиться в выходе ровно один раз.
 3. Можно использовать только разрешённые имена связей.
 4. Нельзя придумывать новые связи.
-5. Нельзя возвращать ничего, кроме JSON-объекта формата {"nodes": [...]}.
+5. Нельзя возвращать ничего, кроме JSON-объекта формата {\"nodes\": [...]}.
 6. В каждом объекте ответа должны быть только поля:
    - id
    - syntactic_link_name
@@ -498,144 +459,25 @@ A добавляет дополнительный элемент к B.
 Верни только JSON-объект:
 
 {
-  "nodes": [
+  \"nodes\": [
     {
-      "id": "...",
-      "syntactic_link_name": "..."
+      \"id\": \"...\",
+      \"syntactic_link_name\": \"...\"
     }
   ]
-}
-```
+}"""),
+        ],
+    )
 
----
+    for chunk in client.models.generate_content_stream(
+        model=model,
+        contents=contents,
+        config=generate_content_config,
+    ):
+        if text := chunk.text:
+            print(text, end="")
 
-## 4. Рабочий user prompt template
+if __name__ == "__main__":
+    generate()
 
-### `NODE_LEVEL_USER_PROMPT_TEMPLATE`
-
-```text
-Ты должен определить semantic relation для каждого узла относительно его головного узла.
-
-Правила:
-- Если syntactic_link_target_id == null, связь всегда ROOT.
-- Используй только разрешённые имена связей из system prompt.
-- Для каждого входного узла верни ровно один результат.
-- Не возвращай ничего, кроме JSON-объекта с полем "nodes".
-
-Входные данные:
-{{INPUT_JSON}}
-
-Вывод:
-```
-
----
-
-## 5. Более дешёвая runtime-версия
-
-Если потребуется снизить стоимость, можно использовать сокращённый system prompt, но только после сравнения качества на выборке.
-
-### `NODE_LEVEL_SYSTEM_PROMPT_MEDIUM`
-
-```text
-Ты размечаешь semantic relation между узлом A и его головным узлом B внутри одного предложения.
-
-Вход:
-- text
-- nodes[]
-У узла могут быть поля:
-id, name, lemma, pos_universal, features, syntactic_link_target_id, original_deprel, introduced_by, head_lemma
-
-Главные правила:
-- syntactic_link_target_id == null => ROOT
-- каждый id должен появиться в ответе ровно один раз
-- использовать только разрешённые связи
-- вернуть только JSON формата {"nodes":[{"id":"...","syntactic_link_name":"..."}]}
-
-Ключевые группы связей:
-- тематические: Agent, Patient, Recipient, Instrument
-- статические пространственные: Inclusion_Containment, Exteriority, Support, Subjacency, Covering_Superadjacency, Proximity, Contact_Adjacency, Attachment, Front_Region, Posterior_Region_Behind, Intermediacy, Opposition_Across_from, Alignment_Alongness, Circumference_Encirclement, Crossing_Transverse, Lateral_Beside, Functional_Proximity
-- динамика ИЗ: Source_as_Origin, Egress_Exiting_an_Interior, Separation_from_a_Surface, Departure_from_a_Landmark, Emergence_from_below, Descent_from_a_high_point, Ascent_to_a_high_point, Detachment, Egress_from_an_intermediate_position, Emergence_from_behind_an_obstacle
-- динамика К: Goal_as_Recipient, Distribution_over_an_area, Ingress_Entering_an_Interior, Attaining_a_Surface, Approaching_a_Landmark, Attachment_Connection, Reaching_a_lower_position, Reaching_the_other_side_Crossing, Movement_to_a_posterior_region, Entering_an_intermediate_position
-- траектория: Penetration, Transverse, Alignment, Bypass, Circumvention, Vertical_path, Superlative_Sublative, Interlative
-- абстрактные: Reaching_an_abstract_goal_state, Metaphorical_Path, Finality, Acquisition
-- количественные: Numeric, Quantitative_Large, Quantitative_Small, Collective_Relation, Approximative_Relation, Proportional_Fractional_Relation, Metric_Measuring_Relation
-- временные: Duration, Point_in_Time, Frequency, Terminus_ad_quem_Deadline, Prospective_Starting_point
-- атрибутивные: Quality, Possession, Content_Theme, Addition_Conjunction, Disjunction
-- логические/клауза-подобные: Contrast, Juxtaposition, Concession, Alternative, Clarification, Sequence_in_time_before, Sequence_in_time_after, Sequence_in_time_while, Reason_because, Result_since, Result_because, Goal, Condition, Comparison, Specification_which, Specification_that_is, Exception, Addition
-
-Ключевые разграничения:
-- Agent = инициатор; Patient = подвергается действию
-- Recipient = получатель; Instrument = средство
-- Inclusion = внутри; Support = на поверхности; Contact_Adjacency = соприкасается
-- Attachment = прочно прикреплён
-- Duration = как долго; Point_in_Time = когда; Frequency = как часто
-- Quality = свойство; Possession = принадлежность; Content_Theme = тема/содержание
-
-Отвечай только JSON.
-```
-
----
-
-## 6. Отдельный короткий ontology context fragment
-
-Этот блок можно собирать отдельно и подмешивать в system prompt, если generation layer будет строить prompt из нескольких фрагментов.
-
-### `NODE_LEVEL_ONTOLOGY_CONTEXT_EXPANDED`
-
-```text
-Разрешённые связи:
-Agent, Patient, Recipient, Instrument,
-Inclusion_Containment, Exteriority, Support, Subjacency, Covering_Superadjacency, Proximity, Contact_Adjacency, Attachment, Front_Region, Posterior_Region_Behind, Intermediacy, Opposition_Across_from, Alignment_Alongness, Circumference_Encirclement, Crossing_Transverse, Lateral_Beside, Functional_Proximity,
-Source_as_Origin, Egress_Exiting_an_Interior, Separation_from_a_Surface, Departure_from_a_Landmark, Emergence_from_below, Descent_from_a_high_point, Ascent_to_a_high_point, Detachment, Egress_from_an_intermediate_position, Emergence_from_behind_an_obstacle,
-Goal_as_Recipient, Distribution_over_an_area, Ingress_Entering_an_Interior, Attaining_a_Surface, Approaching_a_Landmark, Attachment_Connection, Reaching_a_lower_position, Reaching_the_other_side_Crossing, Movement_to_a_posterior_region, Entering_an_intermediate_position,
-Penetration, Transverse, Alignment, Bypass, Circumvention, Vertical_path, Superlative_Sublative, Interlative,
-Reaching_an_abstract_goal_state, Metaphorical_Path, Finality, Acquisition,
-Numeric, Quantitative_Large, Quantitative_Small, Collective_Relation, Approximative_Relation, Proportional_Fractional_Relation, Metric_Measuring_Relation,
-Duration, Point_in_Time, Frequency, Terminus_ad_quem_Deadline, Prospective_Starting_point,
-Quality, Possession, Content_Theme, Addition_Conjunction, Disjunction,
-Contrast, Juxtaposition, Concession, Alternative, Clarification, Sequence_in_time_before, Sequence_in_time_after, Sequence_in_time_while, Reason_because, Result_since, Result_because, Goal, Condition, Comparison, Specification_which, Specification_that_is, Exception, Addition,
-ROOT.
-
-Группы:
-- тематические роли
-- статические пространственные отношения
-- динамические отношения ИЗ / К / по траектории
-- абстрактные и метафорические
-- количественные
-- временные
-- атрибутивные и логические
-- clause-like relations
-```
-
----
-
-## 7. Практический совет по использованию
-
-### Для основных production-прогонов
-Используй:
-- `FULL_NODE_LEVEL_SYSTEM_PROMPT`
-- `NODE_LEVEL_USER_PROMPT_TEMPLATE`
-
-### Для дешёвых bulk-прогонов
-Используй:
-- `NODE_LEVEL_SYSTEM_PROMPT_MEDIUM`
-- `NODE_LEVEL_USER_PROMPT_TEMPLATE`
-
-### Для конфликтных / сложных случаев
-Перезапускай с:
-- `FULL_NODE_LEVEL_SYSTEM_PROMPT`
-- тем же user prompt
-- более высоким thinking budget
-
----
-
-## 8. Что сознательно не включено
-
-В этот prompt-пакет специально не включены:
-- типы предложений declarative / interrogative / imperative
-- emotion metadata
-- межпредложенческие связи
-- factual-layer relations
-
-Это должен быть отдельный будущий слой, а не часть текущей node-level generation.
 

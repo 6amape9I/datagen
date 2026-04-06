@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
-from response_schema import build_runtime_ontology_context
+from response_schema import get_annotation_roles
+
+
+PROMPT_ASSET_PATH = Path(__file__).resolve().parent / "prompt_assets" / "node_level_system_prompt.md"
 
 
 @dataclass(frozen=True)
@@ -16,15 +21,14 @@ class PromptPackage:
         return f"{self.system_prompt}\n\n{self.user_prompt}".strip()
 
 
+@lru_cache(maxsize=1)
+def _load_system_prompt_template() -> str:
+    return PROMPT_ASSET_PATH.read_text(encoding="utf-8").strip()
+
+
 def build_system_prompt() -> str:
-    rules = [
-        "You are a semantic relation annotator for compact nodes inside a single sentence.",
-        "Choose exactly one syntactic_link_name for every node.",
-        "Return only JSON with shape {\"nodes\":[{\"id\":\"...\",\"syntactic_link_name\":\"...\"}]} and no extra text.",
-        "If syntactic_link_target_id is null, choose ROOT. Otherwise ROOT is forbidden.",
-        "Use only the allowed ontology labels below.",
-    ]
-    return "\n".join(rules) + "\n\n" + build_runtime_ontology_context()
+    allowed_labels = ", ".join(get_annotation_roles())
+    return _load_system_prompt_template().replace("{{ALLOWED_LABELS}}", allowed_labels)
 
 
 def build_user_prompt(model_input: dict[str, Any]) -> str:

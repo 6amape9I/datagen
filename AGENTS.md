@@ -2,7 +2,6 @@
 
 ## Project Structure & Modules
 - Stages: `01_preprocessor/`, `03_generation/`, `04_postprocessor/`.
-- Compatibility wrappers: `02_local_generation/`, `03_annotation/`.
 - Shared config: `config/` with pure path definitions in `config/paths.py`.
 - Utilities: `utils/`.
 - Data & logs: `datasets/01_raw_corpus`, `datasets/02_preprocessed`, `datasets/04_fixed`, `datasets/05_final`, and `logs/`.
@@ -12,7 +11,7 @@
 - Preprocess corpus: `python 01_preprocessor/main.py` -> writes compact JSON to `datasets/02_preprocessed`.
 - Local generation: `python 03_generation/local_gen.py` -> writes JSONL to `datasets/04_fixed`.
 - Google generation: `python 03_generation/google_gen.py` -> writes JSONL to `datasets/04_fixed`.
-  - Configure API keys via `GEMINI_API_KEYS="key1,key2"` when using Google GenAI.
+  - Configure API keys via `GOOGLE_API_KEYS="key1,key2"` when using Google GenAI.
 - Scheduler: `python 03_generation/scheduler.py`.
 - Final dataset: `python 04_postprocessor/prepare_final_dataset.py` -> writes to `datasets/05_final`.
 - Optional analysis: `python utils/analyze_dataset.py`.

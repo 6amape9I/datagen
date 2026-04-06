@@ -31,6 +31,7 @@ First-pass empirical report: [`docs/stage01_first_pass_audit.md`](/home/t_6amape
 - [`03_generation/local_gen.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/local_gen.py)
 - [`03_generation/google_gen.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/google_gen.py)
 - [`03_generation/scheduler.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/scheduler.py)
+- [`03_generation/README.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/03_generation/README.md)
 
 Stage 03:
 
@@ -63,7 +64,6 @@ Stage 04 объединяет compact Stage 01 nodes и Stage 03 labels по `id
 - [`config/defaults.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/defaults.py)
 - [`config/generate_conf.example.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.example.py)
 - [`config/pipeline_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/pipeline_conf.py)
-- [`config/prompts.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/prompts.py)
 - [`config/semantic.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/semantic.py)
 
 `config/paths.py` больше не создаёт директории при импорте. Runtime-директории создаются только entrypoint’ами.
@@ -76,16 +76,16 @@ Runtime-config приоритет:
 
 Поддерживаемые env overrides:
 
-- `GEMINI_MODEL_NAME`
-- `GEMINI_API_KEYS`
-- `GEMINI_SCHEDULER_KEYS`
-- `GEMINI_REQUEST_STRATEGY`
-- `GEMINI_THINKING_BUDGET`
+- `GOOGLE_MODEL_NAME`
+- `GOOGLE_API_KEYS`
+- `GOOGLE_SCHEDULER_KEYS`
+- `GOOGLE_THINKING_LEVEL`
+- `GOOGLE_ENABLE_SEARCH_TOOL`
+- `LOCAL_MODEL_NAME`
 - `GENERATION_MAX_OUTPUT_TOKENS`
 - `GENERATION_TEMPERATURE`
 - `GENERATION_PROFILE`
 - `LOCAL_API_URL`
-- `LOCAL_INFER_URL`
 
 ## Установка
 
@@ -118,8 +118,6 @@ python -m pytest 01_preprocessor/tests -q
 Логи:
 
 - `logs/processor.log`
-- `logs/local_generation_errors.log`
-- `logs/validator_errors.log`
 - `logs/scheduler_summary.log`
 
 ## Замечания

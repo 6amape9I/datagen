@@ -6,7 +6,7 @@ from typing import Any
 
 import requests
 
-from config import GENERATION_PROFILE, LOCAL_API_URL, MODEL_NAME
+from config import GENERATION_PROFILE, LOCAL_API_URL, LOCAL_MODEL_NAME
 from prompt_builder import PromptPackage
 from providers.base import GenerationResult, ProviderMetadata
 
@@ -15,7 +15,7 @@ from providers.base import GenerationResult, ProviderMetadata
 class LocalHTTPProvider:
     metadata: ProviderMetadata = ProviderMetadata(
         provider="local_http",
-        model_name=MODEL_NAME,
+        model_name=LOCAL_MODEL_NAME,
         generation_profile=GENERATION_PROFILE,
     )
     endpoint_url: str = LOCAL_API_URL

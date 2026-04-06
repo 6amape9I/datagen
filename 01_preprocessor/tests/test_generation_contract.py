@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from input_builder import build_model_input
-from prompt_builder import build_prompt_package
+from prompt_builder import PROMPT_ASSET_PATH, build_prompt_package
+from providers.google_genai import (
+    build_google_request_debug_snapshot,
+    build_google_tools,
+    normalize_google_thinking_level,
+)
 from response_schema import build_response_json_schema, get_annotation_roles
 from sentence_builder import process_conllu_file
 from validator import validate_response
@@ -41,15 +47,16 @@ def test_generation_input_builder_uses_compact_nodes_only(tmp_path: Path) -> Non
     assert llm_payload["nodes"][1]["head_lemma"] == "city"
 
 
-def test_generation_prompt_builder_stays_compact(tmp_path: Path) -> None:
+def test_generation_prompt_builder_uses_canonical_prompt_asset(tmp_path: Path) -> None:
     record = _build_sample_record(tmp_path)
     prompt = build_prompt_package(build_model_input(record))
 
-    assert "semantic relation annotator" in prompt.system_prompt
+    assert PROMPT_ASSET_PATH.exists()
+    assert "Allowed labels:" in prompt.system_prompt
+    assert "{{ALLOWED_LABELS}}" not in prompt.system_prompt
     assert "Payload:" in prompt.user_prompt
     assert '"text":"The city in France"' in prompt.user_prompt
     assert "sentence_id" not in prompt.user_prompt
-    assert "Давай ты потренируешься" not in prompt.system_prompt
 
 
 def test_generation_validator_accepts_minimal_valid_output(tmp_path: Path) -> None:
@@ -94,3 +101,46 @@ def test_generation_response_schema_matches_shared_ontology() -> None:
 
     assert len(roles) == len(set(roles))
     assert schema["properties"]["nodes"]["items"]["properties"]["syntactic_link_name"]["enum"] == roles
+
+
+def test_google_provider_helpers_disable_search_by_default() -> None:
+    class DummyTypes:
+        class GoogleSearch:
+            def __init__(self):
+                self.kind = "search"
+
+        class Tool:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+    assert build_google_tools(DummyTypes, enable_search_tool=False) == []
+    tools = build_google_tools(DummyTypes, enable_search_tool=True)
+    assert len(tools) == 1
+    assert "googleSearch" in tools[0].kwargs
+    assert normalize_google_thinking_level("medium") == "MEDIUM"
+    assert normalize_google_thinking_level("unknown") == "HIGH"
+
+
+def test_google_provider_debug_dump_prints_full_request_bundle(tmp_path: Path) -> None:
+    record = _build_sample_record(tmp_path)
+    model_input = build_model_input(record)
+    prompt = build_prompt_package(model_input)
+
+    snapshot = build_google_request_debug_snapshot(
+        prompt,
+        model_name="gemma-4-31b-it",
+        max_output_tokens=32760,
+        temperature=0.0,
+        thinking_level="HIGH",
+        enable_search_tool=True,
+    )
+
+    print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True))
+
+    assert snapshot["provider"] == "google_genai"
+    assert snapshot["model"] == "gemma-4-31b-it"
+    assert snapshot["config"]["thinking_level"] == "HIGH"
+    assert snapshot["config"]["tools"] == ["googleSearch"]
+    assert snapshot["config"]["response_schema"] == build_response_json_schema()
+    assert "Allowed labels:" in snapshot["system_prompt"]
+    assert '"text":"The city in France"' in snapshot["user_prompt"]

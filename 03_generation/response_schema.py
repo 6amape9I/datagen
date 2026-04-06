@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from config import ALL_RELATION_NAMES
-from context.semantic_roles_compact import build_compact_ontology_text
 
 
 def get_annotation_roles() -> list[str]:
@@ -62,7 +61,3 @@ def build_google_response_schema(types_module: Any) -> Any:
             )
         },
     )
-
-
-def build_runtime_ontology_context() -> str:
-    return build_compact_ontology_text()

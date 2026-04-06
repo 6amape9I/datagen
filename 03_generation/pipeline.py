@@ -1,20 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
 from typing import Any, Iterable
-
-CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
-for path in (PROJECT_ROOT, CURRENT_DIR):
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
 
 from config import (
     FIXED_DATA_DIR,

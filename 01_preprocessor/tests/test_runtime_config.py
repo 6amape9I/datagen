@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 
 from config.runtime import load_private_overrides, load_runtime_config
 
@@ -15,14 +16,14 @@ def test_runtime_config_uses_defaults_without_private_file(monkeypatch) -> None:
     config = load_runtime_config(environ={}, private_overrides=private)
 
     assert private == {}
-    assert config.model_name == "gemini-flash-latest"
+    assert config.google_model_name == "gemma-4-31b-it"
+    assert config.local_model_name == "local_http"
     assert config.local_api_url == "http://127.0.0.1:8080/generate"
-    assert config.local_infer_url == "http://127.0.0.1:8000/infer"
-    assert config.api_keys == []
-    assert config.scheduler_keys == []
-    assert config.request_strategy == "genai"
-    assert config.thinking_budget == 256
-    assert config.max_output_tokens == 4096
+    assert config.google_api_keys == []
+    assert config.google_scheduler_keys == []
+    assert config.google_thinking_level == "HIGH"
+    assert config.google_enable_search_tool is False
+    assert config.max_output_tokens == 32760
     assert config.temperature == 0.0
     assert config.generation_profile == "standard"
 
@@ -30,37 +31,38 @@ def test_runtime_config_uses_defaults_without_private_file(monkeypatch) -> None:
 def test_runtime_config_uses_env_over_private_and_defaults() -> None:
     config = load_runtime_config(
         environ={
-            "GEMINI_MODEL_NAME": "env-model",
-            "GEMINI_API_KEYS": "env-key-1, env-key-2",
-            "GEMINI_SCHEDULER_KEYS": "env-scheduler",
-            "GEMINI_REQUEST_STRATEGY": "local",
+            "GOOGLE_MODEL_NAME": "env-google-model",
+            "LOCAL_MODEL_NAME": "env-local-model",
+            "GOOGLE_API_KEYS": "env-key-1, env-key-2",
+            "GOOGLE_SCHEDULER_KEYS": "env-scheduler",
             "LOCAL_API_URL": "http://env.local/generate",
-            "LOCAL_INFER_URL": "http://env.local/infer",
-            "GEMINI_THINKING_BUDGET": "512",
+            "GOOGLE_THINKING_LEVEL": "medium",
+            "GOOGLE_ENABLE_SEARCH_TOOL": "true",
             "GENERATION_MAX_OUTPUT_TOKENS": "2048",
             "GENERATION_TEMPERATURE": "0.2",
             "GENERATION_PROFILE": "review",
         },
         private_overrides={
-            "MODEL_NAME": "private-model",
-            "API_KEYS_STR": "private-key",
-            "ALL_KEYS_FOR_SHEDULE": "private-scheduler",
+            "GOOGLE_MODEL_NAME": "private-google-model",
+            "LOCAL_MODEL_NAME": "private-local-model",
+            "GOOGLE_API_KEYS_STR": "private-key",
+            "GOOGLE_SCHEDULER_KEYS_STR": "private-scheduler",
             "LOCAL_API_URL": "http://private.local/generate",
-            "LOCAL_INFER_URL": "http://private.local/infer",
-            "THINKING_BUDGET": "128",
+            "GOOGLE_THINKING_LEVEL": "low",
+            "GOOGLE_ENABLE_SEARCH_TOOL": False,
             "MAX_OUTPUT_TOKENS": "1024",
             "TEMPERATURE": "0.1",
             "GENERATION_PROFILE": "bulk",
         },
     )
 
-    assert config.model_name == "env-model"
-    assert config.api_keys == ["env-key-1", "env-key-2"]
-    assert config.scheduler_keys == ["env-scheduler"]
-    assert config.request_strategy == "local"
+    assert config.google_model_name == "env-google-model"
+    assert config.local_model_name == "env-local-model"
+    assert config.google_api_keys == ["env-key-1", "env-key-2"]
+    assert config.google_scheduler_keys == ["env-scheduler"]
     assert config.local_api_url == "http://env.local/generate"
-    assert config.local_infer_url == "http://env.local/infer"
-    assert config.thinking_budget == 512
+    assert config.google_thinking_level == "MEDIUM"
+    assert config.google_enable_search_tool is True
     assert config.max_output_tokens == 2048
     assert config.temperature == 0.2
     assert config.generation_profile == "review"
@@ -70,24 +72,41 @@ def test_runtime_config_uses_private_overrides_when_env_missing() -> None:
     config = load_runtime_config(
         environ={},
         private_overrides={
-            "MODEL_NAME": "private-model",
-            "API_KEYS_STR": "private-key",
-            "ALL_KEYS_FOR_SHEDULE": "private-scheduler-1, private-scheduler-2",
+            "GOOGLE_MODEL_NAME": "private-google-model",
+            "LOCAL_MODEL_NAME": "private-local-model",
+            "GOOGLE_API_KEYS_STR": "private-key",
             "LOCAL_API_URL": "http://private.local/generate",
-            "LOCAL_INFER_URL": "http://private.local/infer",
-            "THINKING_BUDGET": "768",
+            "GOOGLE_THINKING_LEVEL": "off",
+            "GOOGLE_ENABLE_SEARCH_TOOL": "no",
             "MAX_OUTPUT_TOKENS": "8192",
             "TEMPERATURE": "0.4",
             "GENERATION_PROFILE": "hard-cases",
         },
     )
 
-    assert config.model_name == "private-model"
-    assert config.api_keys == ["private-key"]
-    assert config.scheduler_keys == ["private-scheduler-1", "private-scheduler-2"]
+    assert config.google_model_name == "private-google-model"
+    assert config.local_model_name == "private-local-model"
+    assert config.google_api_keys == ["private-key"]
+    assert config.google_scheduler_keys == ["private-key"]
     assert config.local_api_url == "http://private.local/generate"
-    assert config.local_infer_url == "http://private.local/infer"
-    assert config.thinking_budget == 768
+    assert config.google_thinking_level == "OFF"
+    assert config.google_enable_search_tool is False
     assert config.max_output_tokens == 8192
     assert config.temperature == 0.4
     assert config.generation_profile == "hard-cases"
+
+
+def test_load_private_overrides_accepts_legacy_private_field_names(monkeypatch) -> None:
+    fake_module = SimpleNamespace(
+        MODEL_NAME="legacy-model",
+        API_KEYS_STR="legacy-key",
+        ALL_KEYS_FOR_SHEDULE="legacy-scheduler",
+    )
+
+    monkeypatch.setattr(importlib, "import_module", lambda module_name: fake_module)
+
+    private = load_private_overrides()
+
+    assert private["GOOGLE_MODEL_NAME"] == "legacy-model"
+    assert private["GOOGLE_API_KEYS_STR"] == "legacy-key"
+    assert private["GOOGLE_SCHEDULER_KEYS_STR"] == "legacy-scheduler"

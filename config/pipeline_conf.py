@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 
-from .runtime import ALL_SCHEDULER_KEYS, API_KEYS, REQUEST_STRATEGY
-
 
 NUM_WORKERS = int(os.environ.get("GENAI_NUM_WORKERS", "8"))
 

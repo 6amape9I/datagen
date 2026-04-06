@@ -18,9 +18,9 @@ for path in (PROJECT_ROOT, CURRENT_DIR):
 
 from config import (
     FIXED_DATA_DIR,
+    GOOGLE_SCHEDULER_KEYS,
     INITIAL_BACKOFF_DELAY,
     MAX_RETRIES,
-    REQUEST_STRATEGY,
     SCHEDULER_CONSECUTIVE_ERROR_LIMIT,
     SCHEDULER_DAILY_QUOTA,
     SCHEDULER_LOG_PATH,
@@ -32,11 +32,10 @@ from pipeline import (
     build_output_record,
     build_task_queue,
     load_processed_ids,
-    validate_response,
     write_output_record,
 )
+from validator import validate_response
 from providers.google_genai import GoogleGenAIProvider
-from providers.local_http import LocalHTTPProvider
 
 
 class KeyPool:
@@ -76,12 +75,6 @@ class WorkerMetrics:
     stop_reason: str = ""
     last_error: str | None = None
     consecutive_failures: int = 0
-
-
-def _select_provider():
-    if REQUEST_STRATEGY in {"google", "genai"}:
-        return GoogleGenAIProvider()
-    return LocalHTTPProvider()
 
 
 def _log_summary(
@@ -195,16 +188,16 @@ def _scheduler_worker(
 
 def run_scheduler_once() -> None:
     ensure_stage03_runtime_dirs()
-    provider = _select_provider()
+    provider = GoogleGenAIProvider()
     processed_ids = load_processed_ids(FIXED_DATA_DIR)
     task_queue, total_tasks = build_task_queue(processed_ids)
     if total_tasks == 0:
         print("✅ No new generation tasks for scheduler.")
         return
 
-    tokens = provider.worker_tokens(SCHEDULER_MAX_CONCURRENT_WORKERS)
+    tokens = list(GOOGLE_SCHEDULER_KEYS)[:SCHEDULER_MAX_CONCURRENT_WORKERS]
     if not tokens:
-        print(f"⚠️ No credentials available for scheduler provider {provider.metadata.provider}.")
+        print("⚠️ No Google scheduler keys configured.")
         return
 
     key_pool = KeyPool(tokens[:SCHEDULER_MAX_CONCURRENT_WORKERS])
