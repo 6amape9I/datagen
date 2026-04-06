@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -18,6 +19,10 @@ from queue import Empty, Queue
 from typing import List, Optional, Tuple
 
 import requests
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import (
     FIXED_DATA_DIR,
@@ -272,7 +277,7 @@ def _scheduler_worker(
 def run_scheduler_once() -> None:
     """Запуск задачи сбора данных один раз (расчёт на выполнение ~1 раз в день)."""
     if not ALL_SCHEDULER_KEYS:
-        print("❌ В config.generate_conf.ALL_KEYS_FOR_SHEDULE не заданы ключи для шедулера.")
+        print("❌ Для шедулера не заданы ключи. Используйте GEMINI_SCHEDULER_KEYS или локальный config/generate_conf.py.")
         return
 
     ensure_stage03_runtime_dirs()

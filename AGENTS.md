@@ -35,6 +35,7 @@
 - Never commit API keys.
 - Large data and logs are gitignored; do not commit corpora.
 - Worker limits and retry settings live in `config/pipeline_conf.py`.
+- Optional private overrides may live in `config/generate_conf.py`, but the repo must import cleanly without that file.
 
 ## Agent-Specific Notes
 - Stage 01 production output is compact `nodes[]` only.

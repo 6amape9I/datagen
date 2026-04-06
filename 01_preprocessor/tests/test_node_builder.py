@@ -62,3 +62,30 @@ def test_node_builder_handles_non_integer_tokens_predictably() -> None:
 
     assert raw_tokens[0].is_integer_id is False
     assert [node.id for node in nodes] == ["w1", "w3"]
+
+
+def test_node_builder_renders_cjk_without_artificial_spaces() -> None:
+    sentence = [
+        _FakeToken("1", "周遭", "周遭", "NOUN", "NOUN", "3", "nmod"),
+        _FakeToken("2", "的", "的", "SCONJ", "SCONJ", "1", "mark:rel"),
+        _FakeToken("3", "朋友", "朋友", "NOUN", "NOUN", "0", "root"),
+    ]
+
+    raw_tokens = normalize_sentence_tokens(sentence)
+    nodes = build_nodes(raw_tokens, language_code="UD_Chinese-GSD")
+
+    assert [node.name for node in nodes] == ["周遭的", "朋友"]
+    assert nodes[0].introduced_by == ["的"]
+
+
+def test_node_builder_strips_underscore_wrappers_from_surface() -> None:
+    sentence = [
+        _FakeToken("1", "_של_", "של", "ADP", "ADP", "2", "case:gen"),
+        _FakeToken("2", "בית", "בית", "NOUN", "NOUN", "0", "root"),
+    ]
+
+    raw_tokens = normalize_sentence_tokens(sentence)
+    nodes = build_nodes(raw_tokens, language_code="UD_Hebrew-HTB")
+
+    assert nodes[0].name == "של בית"
+    assert nodes[0].introduced_by == ["של"]

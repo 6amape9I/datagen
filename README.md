@@ -20,6 +20,9 @@ Stage 01:
 - нормализует UD-токены только как internal builder step
 - строит компактные semantic nodes
 - пишет только production `nodes[]`, без `tokens`, `units`, `legacy_nodes` и candidate lists
+- поддерживает reproducible audit через [`01_preprocessor/audit_preprocessed.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/01_preprocessor/audit_preprocessed.py)
+
+First-pass empirical report: [`docs/stage01_first_pass_audit.md`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/docs/stage01_first_pass_audit.md)
 
 ## Stage 02
 
@@ -58,12 +61,29 @@ Stage 04 объединяет compact Stage 01 nodes и Stage 03 labels по `id
 Ключевые файлы:
 
 - [`config/paths.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/paths.py)
-- [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py)
+- [`config/runtime.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/runtime.py)
+- [`config/defaults.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/defaults.py)
+- [`config/generate_conf.example.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.example.py)
 - [`config/pipeline_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/pipeline_conf.py)
 - [`config/prompts.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/prompts.py)
 - [`config/semantic.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/semantic.py)
 
 `config/paths.py` больше не создаёт директории при импорте. Runtime-директории создаются только entrypoint’ами.
+
+Runtime-config приоритет:
+
+- environment variables
+- локальный приватный `config/generate_conf.py`, если он существует
+- публичные defaults из `config/defaults.py`
+
+Поддерживаемые env overrides:
+
+- `GEMINI_MODEL_NAME`
+- `GEMINI_API_KEYS`
+- `GEMINI_SCHEDULER_KEYS`
+- `GEMINI_REQUEST_STRATEGY`
+- `LOCAL_API_URL`
+- `LOCAL_INFER_URL`
 
 ## Установка
 
@@ -77,6 +97,7 @@ pip install pyconll google-genai tqdm requests pytest
 
 ```bash
 python 01_preprocessor/main.py
+python 01_preprocessor/audit_preprocessed.py --mode rebuild --sentence-limit 200
 python 02_local_generation/pipeline.py
 python 03_annotation/pipeline.py
 python 03_annotation/scheduler.py
@@ -104,4 +125,5 @@ python -m pytest 01_preprocessor/tests -q
 
 - split определяется по имени файла: `train`, `dev|val`, `test`
 - compact Stage 01 output intentionally не хранит raw-token trace и builder internals
-- для реальной эксплуатации API keys лучше держать в переменных окружения, а не в [`config/generate_conf.py`](/home/t_6amape9l/PycharmProjects/akin_core_datagen/config/generate_conf.py)
+- проект корректно импортируется и без `config/generate_conf.py`
+- для реальной эксплуатации API keys лучше держать в переменных окружения, а `config/generate_conf.py` использовать только как локальный override

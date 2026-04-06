@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional, Set
 
-from attachment_policy import AttachmentDecision, classify_attachment_type, decide_attachment
+from attachment_policy import AttachmentDecision, classify_attachment_type, decide_attachment, get_language_profile
 from schemas import CompactNode, InternalAttachment, RawToken
 from token_normalizer import collapse_single_value_map, is_integer_token_id
+
+
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]")
 
 
 def _build_attachment(token: RawToken, attachment_type: str) -> InternalAttachment:
     return InternalAttachment(
         token_id=token.token_id,
-        form=token.form,
+        form=_clean_surface_piece(token.form),
         attachment_type=attachment_type,
     )
 
@@ -60,8 +64,21 @@ def _ordered_unique_token_ids(token_ids: List[str], token_map: Dict[str, RawToke
     return ordered
 
 
-def _build_node_surface(span_token_ids: List[str], token_map: Dict[str, RawToken]) -> str:
-    return " ".join(token_map[token_id].form for token_id in span_token_ids if token_id in token_map)
+def _clean_surface_piece(form: str) -> str:
+    cleaned = (form or "").replace("_", "").strip()
+    return " ".join(cleaned.split())
+
+
+def _join_surface_pieces(pieces: List[str], *, language_code: str) -> str:
+    profile = get_language_profile(language_code)
+    cleaned = [piece for piece in (_clean_surface_piece(piece) for piece in pieces) if piece]
+    if not cleaned:
+        return ""
+
+    if profile == "cjk_low_morphology" and all(_CJK_RE.search(piece) for piece in cleaned):
+        return "".join(cleaned)
+
+    return " ".join(cleaned)
 
 
 def _extract_introducers(attachments: List[InternalAttachment]) -> List[str]:
@@ -130,7 +147,7 @@ def build_nodes(
         nodes.append(
             CompactNode(
                 id=f"w{head_token_id}",
-                name=_build_node_surface(span_token_ids, token_map),
+                name=_join_surface_pieces([token_map[token_id].form for token_id in span_token_ids if token_id in token_map], language_code=language_code),
                 lemma=head.lemma,
                 pos_universal=head.upos,
                 features=collapse_single_value_map(head.feats),
