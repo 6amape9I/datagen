@@ -20,6 +20,7 @@ from config import (
     FIXED_DATA_DIR,
     GOOGLE_SCHEDULER_KEYS,
     INITIAL_BACKOFF_DELAY,
+    MAX_SAMP_PER_JSON,
     MAX_RETRIES,
     SCHEDULER_CONSECUTIVE_ERROR_LIMIT,
     SCHEDULER_DAILY_QUOTA,
@@ -32,9 +33,10 @@ from pipeline import (
     build_output_record,
     build_task_queue,
     load_processed_ids,
+    mask_worker_token,
     write_output_record,
 )
-from validator import validate_response
+from validator import validate_response_with_reason
 from providers.google_genai import GoogleGenAIProvider
 
 
@@ -113,39 +115,56 @@ def _scheduler_worker(
         return
 
     worker_name = f"SchedulerWorker-{worker_id}"
+    masked_token = mask_worker_token(token)
     metrics = WorkerMetrics(worker_name=worker_name, token=token)
     with reports_lock:
         reports.append(metrics)
+    print(f"[{worker_name}] starting provider={provider.metadata.provider} token={masked_token}")
 
     try:
         client = provider.create_client(token)
     except Exception as exc:
         metrics.stop_reason = "client_init_failed"
         metrics.last_error = str(exc)
+        print(f"[{worker_name}] init failed token={masked_token} error={exc}")
         return
+    print(f"[{worker_name}] init ok token={masked_token}")
 
     while True:
         if metrics.successes >= SCHEDULER_DAILY_QUOTA:
             metrics.stop_reason = "daily_quota_reached"
+            print(f"[{worker_name}] stop reason=daily_quota_reached successes={metrics.successes}")
             return
 
         try:
             task: GenerationTask = task_queue.get(timeout=1)
         except Empty:
             metrics.stop_reason = "queue_empty"
+            print(f"[{worker_name}] stop reason=queue_empty")
             return
 
         should_break = False
         requeue_task = False
+        sentence_id = task.sentence_data.get("sentence_id", "N/A")
         try:
             current_delay = INITIAL_BACKOFF_DELAY
             success = False
             for attempt in range(MAX_RETRIES):
+                attempt_number = attempt + 1
+                print(
+                    f"[{worker_name}] request start sentence_id={sentence_id} "
+                    f"attempt={attempt_number}/{MAX_RETRIES}"
+                )
                 result = provider.generate(client, task.prompt)
                 payload = result.payload or {}
                 nodes = payload.get("nodes") if isinstance(payload, dict) else None
 
-                if isinstance(nodes, list) and validate_response(task.sentence_data, nodes):
+                if isinstance(nodes, list):
+                    is_valid, validation_error = validate_response_with_reason(task.sentence_data, nodes)
+                else:
+                    is_valid, validation_error = False, "response payload does not contain nodes list"
+
+                if is_valid:
                     record = build_output_record(
                         task.sentence_data,
                         nodes,
@@ -157,29 +176,46 @@ def _scheduler_worker(
                     success_counter.increment()
                     metrics.successes += 1
                     metrics.consecutive_failures = 0
+                    metrics.last_error = None
+                    print(
+                        f"[{worker_name}] request success sentence_id={sentence_id} "
+                        f"attempt={attempt_number}/{MAX_RETRIES}"
+                    )
                     success = True
                     break
 
-                metrics.last_error = result.error or "validation_failed"
+                metrics.last_error = result.error or validation_error or "validation_failed"
+                print(
+                    f"[{worker_name}] request failed sentence_id={sentence_id} "
+                    f"attempt={attempt_number}/{MAX_RETRIES} reason={metrics.last_error}"
+                )
                 if provider.is_quota_error(result.error):
                     metrics.stop_reason = "quota_error"
                     requeue_task = True
                     should_break = True
+                    print(f"[{worker_name}] quota stop sentence_id={sentence_id}")
                     break
 
                 if attempt < MAX_RETRIES - 1:
+                    print(f"[{worker_name}] retry scheduled sentence_id={sentence_id} sleep={current_delay}s")
                     time.sleep(current_delay)
                     current_delay *= 2
 
             if not success:
                 metrics.consecutive_failures += 1
+                print(
+                    f"[{worker_name}] task failed sentence_id={sentence_id} "
+                    f"consecutive_failures={metrics.consecutive_failures}"
+                )
                 if metrics.consecutive_failures >= SCHEDULER_CONSECUTIVE_ERROR_LIMIT:
                     metrics.stop_reason = "error_threshold"
                     requeue_task = True
                     should_break = True
+                    print(f"[{worker_name}] stop reason=error_threshold")
         finally:
             task_queue.task_done()
             if requeue_task:
+                print(f"[{worker_name}] requeue sentence_id={sentence_id}")
                 task_queue.put(task)
 
         if should_break:
@@ -190,7 +226,10 @@ def run_scheduler_once() -> None:
     ensure_stage03_runtime_dirs()
     provider = GoogleGenAIProvider()
     processed_ids = load_processed_ids(FIXED_DATA_DIR)
-    task_queue, total_tasks = build_task_queue(processed_ids)
+    task_queue, total_tasks = build_task_queue(
+        processed_ids,
+        max_samp_per_json=MAX_SAMP_PER_JSON,
+    )
     if total_tasks == 0:
         print("✅ No new generation tasks for scheduler.")
         return
@@ -206,7 +245,13 @@ def run_scheduler_once() -> None:
     reports_lock = threading.Lock()
     workers: list[threading.Thread] = []
 
+    print(f"=== Scheduler: {provider.metadata.provider} ===")
+    print(f"Model: {provider.metadata.model_name}")
+    print(f"Queued sentences: {total_tasks}")
+    print(f"Max samples per json: {MAX_SAMP_PER_JSON}")
+    print(f"Started workers: {min(len(tokens), SCHEDULER_MAX_CONCURRENT_WORKERS)}")
     for worker_id in range(min(len(tokens), SCHEDULER_MAX_CONCURRENT_WORKERS)):
+        print(f"[SchedulerWorker-{worker_id + 1}] assigned token={mask_worker_token(tokens[worker_id])}")
         thread = threading.Thread(
             target=_scheduler_worker,
             args=(worker_id + 1, provider, key_pool, task_queue, success_counter, reports, reports_lock),

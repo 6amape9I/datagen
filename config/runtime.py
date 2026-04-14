@@ -15,6 +15,7 @@ from .defaults import (
     DEFAULT_LOCAL_API_URL,
     DEFAULT_LOCAL_MODEL_NAME,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_MAX_SAMP_PER_JSON,
     DEFAULT_TEMPERATURE,
 )
 
@@ -29,6 +30,7 @@ PRIVATE_OVERRIDE_FIELDS = (
     "GOOGLE_THINKING_LEVEL",
     "GOOGLE_ENABLE_SEARCH_TOOL",
     "MAX_OUTPUT_TOKENS",
+    "MAX_SAMP_PER_JSON",
     "TEMPERATURE",
     "GENERATION_PROFILE",
 )
@@ -41,6 +43,7 @@ ENV_TO_FIELD = {
     "GOOGLE_THINKING_LEVEL": "GOOGLE_THINKING_LEVEL",
     "GOOGLE_ENABLE_SEARCH_TOOL": "GOOGLE_ENABLE_SEARCH_TOOL",
     "GENERATION_MAX_OUTPUT_TOKENS": "MAX_OUTPUT_TOKENS",
+    "MAX_SAMP_PER_JSON": "MAX_SAMP_PER_JSON",
     "GENERATION_TEMPERATURE": "TEMPERATURE",
     "GENERATION_PROFILE": "GENERATION_PROFILE",
 }
@@ -62,6 +65,7 @@ class RuntimeConfig:
     google_thinking_level: str
     google_enable_search_tool: bool
     max_output_tokens: int
+    max_samp_per_json: int
     temperature: float
     generation_profile: str
 
@@ -113,6 +117,12 @@ def load_runtime_config(
         except (TypeError, ValueError):
             return default
 
+    def _coerce_positive_int(value: Any, default: int) -> int:
+        coerced = _coerce_int(value, default)
+        if coerced < 1:
+            return default
+        return coerced
+
     def _coerce_bool(value: Any, default: bool) -> bool:
         if isinstance(value, bool):
             return value
@@ -140,6 +150,7 @@ def load_runtime_config(
         "GOOGLE_THINKING_LEVEL": str(private.get("GOOGLE_THINKING_LEVEL", DEFAULT_GOOGLE_THINKING_LEVEL)),
         "GOOGLE_ENABLE_SEARCH_TOOL": str(private.get("GOOGLE_ENABLE_SEARCH_TOOL", DEFAULT_GOOGLE_ENABLE_SEARCH_TOOL)),
         "MAX_OUTPUT_TOKENS": str(private.get("MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)),
+        "MAX_SAMP_PER_JSON": str(private.get("MAX_SAMP_PER_JSON", DEFAULT_MAX_SAMP_PER_JSON)),
         "TEMPERATURE": str(private.get("TEMPERATURE", DEFAULT_TEMPERATURE)),
         "GENERATION_PROFILE": str(private.get("GENERATION_PROFILE", DEFAULT_GENERATION_PROFILE)),
     }
@@ -161,6 +172,10 @@ def load_runtime_config(
             DEFAULT_GOOGLE_ENABLE_SEARCH_TOOL,
         ),
         max_output_tokens=_coerce_int(config_values["MAX_OUTPUT_TOKENS"], DEFAULT_MAX_OUTPUT_TOKENS),
+        max_samp_per_json=_coerce_positive_int(
+            config_values["MAX_SAMP_PER_JSON"],
+            DEFAULT_MAX_SAMP_PER_JSON,
+        ),
         temperature=_coerce_float(config_values["TEMPERATURE"], DEFAULT_TEMPERATURE),
         generation_profile=config_values["GENERATION_PROFILE"].strip() or DEFAULT_GENERATION_PROFILE,
     )
@@ -178,5 +193,6 @@ GOOGLE_SCHEDULER_KEYS = RUNTIME_CONFIG.google_scheduler_keys
 GOOGLE_THINKING_LEVEL = RUNTIME_CONFIG.google_thinking_level
 GOOGLE_ENABLE_SEARCH_TOOL = RUNTIME_CONFIG.google_enable_search_tool
 MAX_OUTPUT_TOKENS = RUNTIME_CONFIG.max_output_tokens
+MAX_SAMP_PER_JSON = RUNTIME_CONFIG.max_samp_per_json
 TEMPERATURE = RUNTIME_CONFIG.temperature
 GENERATION_PROFILE = RUNTIME_CONFIG.generation_profile

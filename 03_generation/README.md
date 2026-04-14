@@ -18,6 +18,7 @@ python 03_generation/scheduler.py
 - request generation from either the local HTTP provider or Google GenAI
 - validate minimal `id + syntactic_link_name` output
 - write validated records to `datasets/04_fixed/*.jsonl`
+- enqueue at most `MAX_SAMP_PER_JSON` eligible records from each input `.json`
 
 ## Prompt source
 

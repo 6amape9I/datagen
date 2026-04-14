@@ -12,7 +12,7 @@ from providers.google_genai import (
 )
 from response_schema import build_response_json_schema, get_annotation_roles
 from sentence_builder import process_conllu_file
-from validator import validate_response
+from validator import validate_response, validate_response_with_reason
 
 
 def _build_sample_record(tmp_path: Path):
@@ -52,7 +52,8 @@ def test_generation_prompt_builder_uses_canonical_prompt_asset(tmp_path: Path) -
     prompt = build_prompt_package(build_model_input(record))
 
     assert PROMPT_ASSET_PATH.exists()
-    assert "Allowed labels:" in prompt.system_prompt
+    assert "РОЛЬ" in prompt.system_prompt
+    assert "РАЗРЕШЁННЫЕ СВЯЗИ И ИХ СМЫСЛ" in prompt.system_prompt
     assert "{{ALLOWED_LABELS}}" not in prompt.system_prompt
     assert "Payload:" in prompt.user_prompt
     assert '"text":"The city in France"' in prompt.user_prompt
@@ -93,6 +94,21 @@ def test_generation_validator_rejects_invalid_role_duplicate_id_and_bad_root(tmp
             {"id": "w4", "syntactic_link_name": "ROOT"},
         ],
     ) is False
+
+
+def test_generation_validator_returns_human_readable_reason(tmp_path: Path) -> None:
+    record = _build_sample_record(tmp_path)
+
+    is_valid, error = validate_response_with_reason(
+        record,
+        [
+            {"id": "w2", "syntactic_link_name": "ROOT"},
+            {"id": "w4", "syntactic_link_name": "NotARole"},
+        ],
+    )
+
+    assert is_valid is False
+    assert error == "invalid relation 'NotARole' for node w4"
 
 
 def test_generation_response_schema_matches_shared_ontology() -> None:
@@ -142,5 +158,6 @@ def test_google_provider_debug_dump_prints_full_request_bundle(tmp_path: Path) -
     assert snapshot["config"]["thinking_level"] == "HIGH"
     assert snapshot["config"]["tools"] == ["googleSearch"]
     assert snapshot["config"]["response_schema"] == build_response_json_schema()
-    assert "Allowed labels:" in snapshot["system_prompt"]
+    assert "РОЛЬ" in snapshot["system_prompt"]
+    assert "РАЗРЕШЁННЫЕ СВЯЗИ И ИХ СМЫСЛ" in snapshot["system_prompt"]
     assert '"text":"The city in France"' in snapshot["user_prompt"]

@@ -24,6 +24,7 @@ def test_runtime_config_uses_defaults_without_private_file(monkeypatch) -> None:
     assert config.google_thinking_level == "HIGH"
     assert config.google_enable_search_tool is False
     assert config.max_output_tokens == 32760
+    assert config.max_samp_per_json == 2000
     assert config.temperature == 0.0
     assert config.generation_profile == "standard"
 
@@ -39,6 +40,7 @@ def test_runtime_config_uses_env_over_private_and_defaults() -> None:
             "GOOGLE_THINKING_LEVEL": "medium",
             "GOOGLE_ENABLE_SEARCH_TOOL": "true",
             "GENERATION_MAX_OUTPUT_TOKENS": "2048",
+            "MAX_SAMP_PER_JSON": "1500",
             "GENERATION_TEMPERATURE": "0.2",
             "GENERATION_PROFILE": "review",
         },
@@ -51,6 +53,7 @@ def test_runtime_config_uses_env_over_private_and_defaults() -> None:
             "GOOGLE_THINKING_LEVEL": "low",
             "GOOGLE_ENABLE_SEARCH_TOOL": False,
             "MAX_OUTPUT_TOKENS": "1024",
+            "MAX_SAMP_PER_JSON": "900",
             "TEMPERATURE": "0.1",
             "GENERATION_PROFILE": "bulk",
         },
@@ -64,6 +67,7 @@ def test_runtime_config_uses_env_over_private_and_defaults() -> None:
     assert config.google_thinking_level == "MEDIUM"
     assert config.google_enable_search_tool is True
     assert config.max_output_tokens == 2048
+    assert config.max_samp_per_json == 1500
     assert config.temperature == 0.2
     assert config.generation_profile == "review"
 
@@ -79,6 +83,7 @@ def test_runtime_config_uses_private_overrides_when_env_missing() -> None:
             "GOOGLE_THINKING_LEVEL": "off",
             "GOOGLE_ENABLE_SEARCH_TOOL": "no",
             "MAX_OUTPUT_TOKENS": "8192",
+            "MAX_SAMP_PER_JSON": "777",
             "TEMPERATURE": "0.4",
             "GENERATION_PROFILE": "hard-cases",
         },
@@ -92,8 +97,18 @@ def test_runtime_config_uses_private_overrides_when_env_missing() -> None:
     assert config.google_thinking_level == "OFF"
     assert config.google_enable_search_tool is False
     assert config.max_output_tokens == 8192
+    assert config.max_samp_per_json == 777
     assert config.temperature == 0.4
     assert config.generation_profile == "hard-cases"
+
+
+def test_runtime_config_falls_back_to_default_for_invalid_max_samp_per_json() -> None:
+    config = load_runtime_config(
+        environ={"MAX_SAMP_PER_JSON": "0"},
+        private_overrides={},
+    )
+
+    assert config.max_samp_per_json == 2000
 
 
 def test_load_private_overrides_accepts_legacy_private_field_names(monkeypatch) -> None:
